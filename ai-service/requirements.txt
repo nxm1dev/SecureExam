@@ -1,0 +1,20 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+PyYAML>=6.0
+structlog>=24.0.0
+setuptools>=70.0.0
+
+# Computer Vision
+opencv-python-headless>=4.9.0   # Headless – no GUI needed in server
+insightface>=0.7.3               # Face detection + recognition (buffalo_l model)
+onnxruntime>=1.18.0              # InsightFace inference backend
+
+# Audio
+webrtcvad>=2.0.10                # Google WebRTC Voice Activity Detector
+librosa>=0.10.0                  # Audio feature extraction (MFCCs)
+soundfile>=0.12.1                # Audio I/O
+
+# Numeric
+numpy>=1.26.0

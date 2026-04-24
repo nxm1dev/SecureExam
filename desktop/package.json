@@ -1,0 +1,87 @@
+{
+  "name": "secure-exam-desktop",
+  "version": "1.0.0",
+  "description": "SecureExam – Anti-fraud exam desktop application",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "predev": "node scripts/kill-port.js 3000",
+    "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
+    "dev:react": "webpack serve --config webpack.config.js --mode development",
+    "dev:electron": "wait-on http://localhost:3000 && npm run build:electron && electron .",
+    "build": "webpack --config webpack.config.js --mode production && tsc -p tsconfig.electron.json",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "dist:win": "npm run build && set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win nsis --publish never",
+    "test": "jest"
+  },
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "axios": "^1.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^8.2.0",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.0.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.4.0",
+    "wait-on": "^7.2.0",
+    "webpack": "^5.91.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.0.4",
+    "html-webpack-plugin": "^5.6.0",
+    "css-loader": "^7.1.0",
+    "style-loader": "^4.0.0"
+  },
+  "build": {
+    "appId": "com.secureexam.desktop",
+    "productName": "SecureExam",
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../config",
+        "to": "runtime/config",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../backend",
+        "to": "runtime/backend",
+        "filter": [
+          "**/*",
+          "!tests{,/**/*}",
+          "!__pycache__{,/**/*}",
+          "!.pytest_cache{,/**/*}",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "../ai-service",
+        "to": "runtime/ai-service",
+        "filter": [
+          "**/*",
+          "!tests{,/**/*}",
+          "!__pycache__{,/**/*}",
+          "!.pytest_cache{,/**/*}",
+          "!**/*.pyc"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}

@@ -1,0 +1,71 @@
+# ============================================================
+# SecureExam – Docker Compose for local development
+# Services: PostgreSQL, Backend API, AI Service
+# Desktop app runs natively (Electron)
+# ============================================================
+version: "3.9"
+
+services:
+  # ──────────────────────────────────────────
+  # PostgreSQL Database
+  # ──────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: secureexam_db
+    environment:
+      POSTGRES_USER: secureexam
+      POSTGRES_PASSWORD: secureexam_pass
+      POSTGRES_DB: secureexam
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/migrations/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secureexam"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ──────────────────────────────────────────
+  # Backend API (FastAPI)
+  # ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: secureexam_backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://secureexam:secureexam_pass@db:5432/secureexam"
+      AI_SERVICE_URL: "http://ai-service:8001"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./config:/app/config
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ──────────────────────────────────────────
+  # AI Analysis Service (Python)
+  # ──────────────────────────────────────────
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: secureexam_ai
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./ai-service:/app
+      - ./config:/app/config
+      - ai_models:/app/models_cache   # Persist downloaded model weights
+    environment:
+      MODEL_CACHE_DIR: "/app/models_cache"
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+
+volumes:
+  pgdata:
+  ai_models:

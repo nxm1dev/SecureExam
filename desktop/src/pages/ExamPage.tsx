@@ -1,0 +1,382 @@
+/**
+ * src/pages/ExamPage.tsx
+ * ───────────────────────
+ * The main exam monitoring page.
+ * Layout: thin monitor toolbar at top (64px) + BrowserView below (managed by main process).
+ *
+ * Responsibilities:
+ * - Start camera + mic monitoring
+ * - Display real-time status indicators
+ * - Show violation alerts
+ * - Emit violations to backend
+ * - Provide "End Exam" control
+ */
+
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import CameraMonitor from "../components/CameraMonitor";
+import AlertBanner from "../components/AlertBanner";
+import ViolationList from "../components/ViolationList";
+import { useCamera } from "../hooks/useCamera";
+import { useMicrophone } from "../hooks/useMicrophone";
+import { useViolations, ViolationEvent } from "../hooks/useViolations";
+
+const api = (window as any).electronAPI;
+const ipc = (window as any).require?.("electron")?.ipcRenderer;
+
+interface Props {
+  sessionId: string;
+  userId: string;
+  referenceEmbeddingB64?: string;
+  onExamEnd: () => void;
+}
+
+export default function ExamPage({
+  sessionId,
+  userId,
+  referenceEmbeddingB64,
+  onExamEnd,
+}: Props) {
+  const [elapsed, setElapsed] = useState(0);
+  const [showViolations, setShowViolations] = useState(false);
+  const [latestAlert, setLatestAlert] = useState<{ msg: string; severity: string } | null>(null);
+  const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ── Violations ─────────────────────────────────────────────────
+  const { violations, addViolation, flushViolations } = useViolations({
+    sessionId,
+    userId,
+  });
+
+  const handleViolation = useCallback(
+    (type: string, severity: string, metadata: Record<string, unknown>) => {
+      addViolation(type, severity, metadata);
+      if (severity === "high" || severity === "critical") {
+        const messages: Record<string, string> = {
+          multiple_faces:    "Phát hiện nhiều khuôn mặt trong khung hình!",
+          identity_mismatch: "Khuôn mặt không khớp với người đăng ký!",
+          voice_overlap:     "Phát hiện nhiều người nói cùng lúc!",
+          no_face:           "Không nhìn thấy khuôn mặt của bạn!",
+          fullscreen_exit:   "Bạn đã thoát khỏi chế độ toàn màn hình!",
+          app_focus_lost:    "Bạn đã chuyển sang ứng dụng khác!",
+        };
+        setLatestAlert({
+          msg: messages[type] || `Vi phạm: ${type}`,
+          severity,
+        });
+      }
+    },
+    [addViolation]
+  );
+
+  // ── Camera ─────────────────────────────────────────────────────
+  const { videoRef, canvasRef, status: camStatus, startCamera, stopCamera } = useCamera({
+    sessionId,
+    userId,
+    referenceEmbeddingB64,
+    captureIntervalSeconds: 2,
+    onViolation: handleViolation,
+  });
+
+  // ── Microphone ─────────────────────────────────────────────────
+  const { status: micStatus, startMic, stopMic } = useMicrophone({
+    sessionId,
+    userId,
+    windowSeconds: 3,
+    onViolation: handleViolation,
+  });
+
+  // ── Timer ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // ── Start monitoring on mount ──────────────────────────────────
+  useEffect(() => {
+    startCamera();
+    startMic();
+  }, []);
+
+  // ── Periodic violation flush ──────────────────────────────────
+  useEffect(() => {
+    flushTimerRef.current = setInterval(flushViolations, 5000);
+    return () => {
+      if (flushTimerRef.current) clearInterval(flushTimerRef.current);
+    };
+  }, [flushViolations]);
+
+  // ── Focus/fullscreen listeners from main process ───────────────
+  useEffect(() => {
+    const unFocus = api.onFocusLost(() => {
+      handleViolation("app_focus_lost", "medium", {});
+    });
+    const unFull = api.onFullscreenChange((isFullscreen: boolean) => {
+      if (!isFullscreen) {
+        handleViolation("fullscreen_exit", "high", {});
+      }
+    });
+    return () => { unFocus?.(); unFull?.(); };
+  }, [handleViolation]);
+
+  // ── End exam ───────────────────────────────────────────────────
+  const handleEndExam = async () => {
+    // Flush any remaining violations
+    await flushViolations();
+    stopCamera();
+    stopMic();
+    await api.endExam(sessionId);
+    onExamEnd();
+  };
+
+  const formatTime = (s: number) =>
+    `${String(Math.floor(s / 3600)).padStart(2, "0")}:${
+      String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${
+      String(s % 60).padStart(2, "0")}`;
+
+  const criticalCount = violations.filter(v => v.severity === "critical").length;
+
+  return (
+    <div style={styles.page}>
+      {/* ── Monitor toolbar (64px) ─────────────────────────────── */}
+      <div style={styles.toolbar}>
+        {/* Left: Status indicators */}
+        <div style={styles.indicators}>
+          <Indicator
+            label="Camera"
+            active={camStatus.isRunning}
+            warn={!camStatus.faceDetected && camStatus.isRunning}
+            critical={camStatus.multipleFaces || camStatus.identityMatch === false}
+          />
+          <Indicator
+            label="Mic"
+            active={micStatus.isRunning}
+            warn={micStatus.hasSpeech}
+            critical={micStatus.voiceOverlap}
+          />
+          <div style={styles.timer}>{formatTime(elapsed)}</div>
+        </div>
+
+        {/* Center: Alert banner area */}
+        <div style={styles.alertArea}>
+          {latestAlert && (
+            <AlertBanner
+              message={latestAlert.msg}
+              severity={latestAlert.severity as any}
+              onDismiss={() => setLatestAlert(null)}
+            />
+          )}
+        </div>
+
+        {/* Right: Violation count + End button */}
+        <div style={styles.actions}>
+          <button
+            className="btn btn-ghost"
+            onClick={() => setShowViolations(v => !v)}
+            style={{ position: "relative" }}
+          >
+            🚨 Vi phạm
+            {violations.length > 0 && (
+              <span style={styles.badge}>{violations.length}</span>
+            )}
+          </button>
+          <button className="btn btn-danger" onClick={handleEndExam}>
+            ⏹ Nộp bài
+          </button>
+        </div>
+      </div>
+
+      {/* ── Side panel: camera + violations ───────────────────── */}
+      <div style={styles.sidePanel}>
+        <canvas ref={canvasRef} style={{ display: "none" }} />
+        <CameraMonitor videoRef={videoRef} status={camStatus} />
+
+        {/* Mic status */}
+        <div style={styles.micCard}>
+          <div style={styles.micRow}>
+            <span style={styles.micLabel}>🎙 Microphone</span>
+            <div
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                background: micStatus.isRunning
+                  ? micStatus.voiceOverlap
+                    ? "var(--color-critical)"
+                    : micStatus.hasSpeech
+                    ? "var(--color-warning)"
+                    : "var(--color-success)"
+                  : "var(--color-text-dim)",
+              }}
+              className={micStatus.hasSpeech ? "pulse" : ""}
+            />
+          </div>
+          <div style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+            {micStatus.voiceOverlap
+              ? "🔴 Chồng giọng"
+              : micStatus.rapidChange
+              ? "⚠️ Thay đổi giọng bất thường"
+              : micStatus.hasSpeech
+              ? "🔊 Đang phát hiện giọng"
+              : "✓ Im lặng"}
+          </div>
+        </div>
+
+        {/* Violations panel */}
+        {showViolations && (
+          <div style={styles.violationPanel} className="fade-in">
+            <div style={styles.violationHeader}>
+              Vi phạm
+              {criticalCount > 0 && (
+                <span className="badge badge-critical" style={{ marginLeft: 6 }}>
+                  {criticalCount} nghiêm trọng
+                </span>
+              )}
+            </div>
+            <ViolationList violations={violations} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Sub-component: Status indicator dot ──────────────────────────
+function Indicator({ label, active, warn, critical }: {
+  label: string; active: boolean; warn: boolean; critical: boolean;
+}) {
+  const color = !active
+    ? "var(--color-text-dim)"
+    : critical
+    ? "var(--color-critical)"
+    : warn
+    ? "var(--color-warning)"
+    : "var(--color-success)";
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div
+        style={{ width: 8, height: 8, borderRadius: "50%", background: color }}
+        className={active ? "pulse" : ""}
+      />
+      <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{label}</span>
+    </div>
+  );
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    display: "flex",
+    height: "100vh",
+    background: "var(--color-bg)",
+    position: "relative",
+  },
+  toolbar: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 64,
+    zIndex: 1000,
+    background: "rgba(13,17,23,0.95)",
+    backdropFilter: "blur(12px)",
+    borderBottom: "1px solid var(--color-border)",
+    display: "flex",
+    alignItems: "center",
+    padding: "0 16px",
+    gap: 16,
+  },
+  indicators: {
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+    flexShrink: 0,
+  },
+  timer: {
+    fontFamily: "var(--font-mono)",
+    fontSize: 13,
+    color: "var(--color-text-muted)",
+    paddingLeft: 8,
+    borderLeft: "1px solid var(--color-border)",
+  },
+  alertArea: {
+    flex: 1,
+    display: "flex",
+    justifyContent: "center",
+    padding: "0 16px",
+    maxWidth: 500,
+  },
+  actions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexShrink: 0,
+  },
+  badge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    background: "var(--color-danger)",
+    color: "#fff",
+    borderRadius: "50%",
+    width: 16,
+    height: 16,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 10,
+    fontWeight: 700,
+  },
+  sidePanel: {
+    position: "fixed",
+    top: 64,
+    right: 0,
+    width: 220,
+    height: "calc(100vh - 64px)",
+    background: "rgba(22,27,34,0.95)",
+    borderLeft: "1px solid var(--color-border)",
+    backdropFilter: "blur(8px)",
+    padding: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    overflowY: "auto",
+    zIndex: 999,
+  },
+  micCard: {
+    background: "var(--color-surface)",
+    border: "1px solid var(--color-border)",
+    borderRadius: 8,
+    padding: "10px 12px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  micRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  micLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: "var(--color-text-muted)",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+  },
+  violationPanel: {
+    background: "var(--color-surface)",
+    border: "1px solid var(--color-border)",
+    borderRadius: 8,
+    padding: 12,
+  },
+  violationHeader: {
+    display: "flex",
+    alignItems: "center",
+    fontSize: 12,
+    fontWeight: 600,
+    color: "var(--color-text-muted)",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+    marginBottom: 8,
+  },
+};

@@ -1,0 +1,4 @@
+# AI service pytest config
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
