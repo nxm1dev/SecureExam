@@ -22,6 +22,7 @@ from typing import Optional
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 # Thêm thư mục gốc ai-service vào sys.path để import đúng module
 _SERVICE_DIR = Path(__file__).resolve().parent
@@ -89,8 +90,76 @@ def _on_normal(frame: np.ndarray, bbox: BBox) -> None:
 # Drawing helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Preprocess target (phải khớp với ExamFaceDetector._PREPROCESS_W/H)
+_PREPROCESS_SIZE = (640, 360)
+
+
 def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v))
+
+
+def _load_unicode_font(size: int = 22) -> ImageFont.FreeTypeFont:
+    """
+    Tải font hỗ trợ Unicode (tiếng Việt + emoji).
+    Ưu tiên các font có sẵn trên Windows/Linux.
+    """
+    font_candidates = [
+        # Windows
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/tahoma.ttf",
+        # Linux
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    ]
+    for fp in font_candidates:
+        if os.path.isfile(fp):
+            try:
+                return ImageFont.truetype(fp, size)
+            except Exception:
+                continue
+    # Fallback: font mặc định của Pillow (hỗ trợ Unicode hạn chế)
+    return ImageFont.load_default()
+
+
+# Cache font để không load lại mỗi frame
+_FONT_BANNER: Optional[ImageFont.FreeTypeFont] = None
+_FONT_LABEL: Optional[ImageFont.FreeTypeFont] = None
+
+
+def _get_fonts() -> tuple:
+    """Lazy-load và cache font."""
+    global _FONT_BANNER, _FONT_LABEL
+    if _FONT_BANNER is None:
+        _FONT_BANNER = _load_unicode_font(24)
+    if _FONT_LABEL is None:
+        _FONT_LABEL = _load_unicode_font(18)
+    return _FONT_BANNER, _FONT_LABEL
+
+
+def _put_text_unicode(
+    img: np.ndarray,
+    text: str,
+    position: tuple[int, int],
+    font: ImageFont.FreeTypeFont,
+    color_bgr: tuple[int, int, int],
+) -> np.ndarray:
+    """
+    Vẽ text Unicode lên ảnh OpenCV (BGR) bằng PIL.
+    Trả về ảnh đã vẽ (in-place trên img).
+    """
+    # Chuyển BGR → RGB cho PIL
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(img_rgb)
+    draw = ImageDraw.Draw(pil_img)
+    # Chuyển color BGR → RGB cho PIL
+    color_rgb = (color_bgr[2], color_bgr[1], color_bgr[0])
+    draw.text(position, text, font=font, fill=color_rgb)
+    # Chuyển lại RGB → BGR cho OpenCV
+    result = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    np.copyto(img, result)
+    return img
 
 
 def _normalize_bbox_to_frame(
@@ -99,22 +168,21 @@ def _normalize_bbox_to_frame(
     frame_h: int,
 ) -> tuple[int, int, int, int]:
     """
-    Map bbox từ hệ tọa độ detector về hệ tọa độ frame gốc.
+    Map bbox từ hệ tọa độ detector (640×640) về hệ tọa độ frame gốc.
 
-    Sửa lỗi lệch lên trên đầu thí sinh do detector thường resize ảnh về
-    khung vuông 640x640 theo kiểu letterbox (giữ tỉ lệ + padding).
+    Pipeline đầy đủ:
+    1. Frame gốc (frame_w × frame_h, vd: 1280×720)
+    2. Preprocess resize → (_PREPROCESS_SIZE, vd: 640×360)
+    3. InsightFace letterbox → det_size (640×640) với padding
 
-    Với camera 16:9 như 1280x720:
-    - ảnh được scale theo min(640/1280, 640/720) = 0.5
-    - ảnh sau scale là 640x360
-    - padding top/bottom = 140px mỗi bên
-    => bbox phải được trừ padding rồi chia lại scale.
+    Inverse: bbox (det_size) → bỏ letterbox padding → preprocess coords
+             → scale lại về frame gốc.
     """
     x1, y1, x2, y2 = map(int, bbox)
     det_w, det_h = _DET_SIZE
+    pp_w, pp_h = _PREPROCESS_SIZE
 
     # Nếu bbox trông như đã ở hệ tọa độ frame gốc thì chỉ clamp lại.
-    # Điều này giúp an toàn nếu detector trong tương lai trả bbox theo frame.
     if max(x1, x2) > det_w * 1.5 or max(y1, y2) > det_h * 1.5:
         x1 = _clamp(x1, 0, max(frame_w - 1, 0))
         x2 = _clamp(x2, 0, max(frame_w - 1, 0))
@@ -126,18 +194,31 @@ def _normalize_bbox_to_frame(
             y1, y2 = y2, y1
         return x1, y1, x2, y2
 
-    # Inverse letterbox: frame gốc -> det_size
-    scale = min(det_w / float(frame_w), det_h / float(frame_h))
-    new_w = frame_w * scale
-    new_h = frame_h * scale
+    # ── Bước 1: Inverse letterbox (det_size → preprocessed frame) ──────────
+    # InsightFace letterbox: ảnh 640×360 được nhét vào 640×640
+    # scale = min(640/640, 640/360) = min(1.0, 1.778) = 1.0
+    # → ảnh giữ nguyên width=640, height=360, padding top/bottom = 140px
+    lb_scale = min(det_w / float(pp_w), det_h / float(pp_h))
+    new_w = pp_w * lb_scale
+    new_h = pp_h * lb_scale
     pad_x = (det_w - new_w) / 2.0
     pad_y = (det_h - new_h) / 2.0
 
-    # Bỏ padding rồi đưa về frame gốc
-    x1 = int(round((x1 - pad_x) / scale))
-    x2 = int(round((x2 - pad_x) / scale))
-    y1 = int(round((y1 - pad_y) / scale))
-    y2 = int(round((y2 - pad_y) / scale))
+    # Chuyển từ det coords → preprocessed coords
+    pp_x1 = (x1 - pad_x) / lb_scale
+    pp_x2 = (x2 - pad_x) / lb_scale
+    pp_y1 = (y1 - pad_y) / lb_scale
+    pp_y2 = (y2 - pad_y) / lb_scale
+
+    # ── Bước 2: Inverse preprocess (preprocessed → frame gốc) ─────────────
+    # Preprocess đã resize frame_w×frame_h → pp_w×pp_h
+    scale_x = frame_w / float(pp_w)
+    scale_y = frame_h / float(pp_h)
+
+    x1 = int(round(pp_x1 * scale_x))
+    x2 = int(round(pp_x2 * scale_x))
+    y1 = int(round(pp_y1 * scale_y))
+    y2 = int(round(pp_y2 * scale_y))
 
     # Clamp
     x1 = _clamp(x1, 0, max(frame_w - 1, 0))
@@ -164,30 +245,26 @@ def _draw_overlay(frame: np.ndarray) -> np.ndarray:
         color: tuple = _overlay_state["color"]
         bbox: Optional[BBox] = _overlay_state["bbox"]
 
+    font_banner, font_label = _get_fonts()
+
     # Semi-transparent top banner
     banner_h = 50
     overlay = display.copy()
     cv2.rectangle(overlay, (0, 0), (w, banner_h), (20, 20, 20), -1)
     cv2.addWeighted(overlay, 0.6, display, 0.4, 0, display)
 
-    # Status text
-    cv2.putText(
-        display, label,
-        (16, 34),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.8,
-        color, 2, cv2.LINE_AA,
-    )
+    # Status text (Unicode via PIL)
+    _put_text_unicode(display, label, (16, 12), font_banner, color)
 
     # Bounding box (khi có 1 mặt)
     if bbox is not None:
         x1, y1, x2, y2 = _normalize_bbox_to_frame(bbox, w, h)
 
         cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(
-            display, "Thi sinh",
-            (x1, max(y1 - 8, 16)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-            color, 1, cv2.LINE_AA,
+        _put_text_unicode(
+            display, "Thí sinh",
+            (x1, max(y1 - 24, 2)),
+            font_label, color,
         )
 
     return display
