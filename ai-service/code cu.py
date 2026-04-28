@@ -12,110 +12,123 @@ Gộp 3 phần:
 """
 
 # ╔════════════════════════════════════════════════════════════════════════════╗
-# ║  PHẦN 1: FRONTEND (React / TypeScript) – Code mẫu trong docstring       ║
+# ║  PHAN 1: FRONTEND (React / TypeScript) - Code mau trong docstring       ║
+# ║  TOI UU: WebSocket + Throttle 500ms + JPEG 70% + Scale 640x480          ║
 # ╚════════════════════════════════════════════════════════════════════════════╝
 
 FRONTEND_CODE = """
-// ─── useExamVAD.ts ── Custom Hook tích hợp @ricky0123/vad-web ───────────────
-// npm install @ricky0123/vad-react
+// ─── ExamMonitor.tsx ────────────────────────────────────────────────────────
+// npm install @ricky0123/vad-react @ricky0123/vad-web
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { useMicVAD } from '@ricky0123/vad-react';
 
-interface AnalyzeResult {
-  status: string;
-  message: string;
-  level: number;
+interface ExamMonitorProps {
+  webSocketUrl: string;  // vd: 'ws://localhost:8001/ws/monitor'
 }
 
-const API_URL = 'http://localhost:8001/api/multimodal/analyze';
-
-export const useExamVAD = (videoRef: React.RefObject<HTMLVideoElement>) => {
-  const canvasRef = useRef<HTMLCanvasElement>(document.createElement('canvas'));
+const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [ws, setWs] = useState<WebSocket | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [lastResult, setLastResult] = useState<AnalyzeResult | null>(null);
+  const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Capture frame từ video và gửi lên backend
-  const captureAndSend = useCallback(async (speechDetected: boolean) => {
-    const video = videoRef.current;
+  // Khoi tao WebSocket (nhe hon REST, tranh overhead HTTP headers moi request)
+  useEffect(() => {
+    const socket = new WebSocket(webSocketUrl);
+    socket.onopen = () => console.log('[ExamMonitor] WebSocket Connected');
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('[ExamMonitor] Verdict:', data);
+    };
+    setWs(socket);
+    return () => socket.close();
+  }, [webSocketUrl]);
+
+  // Khoi tao Camera (chi video, audio do VAD xu ly rieng)
+  useEffect(() => {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      .then((stream) => {
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      })
+      .catch(console.error);
+  }, []);
+
+  // ── Ham capture va gui du lieu TOI UU ──────────────────────────────────
+  // - Scale xuong 640x480 de giam payload (thay vi full HD)
+  // - JPEG chat luong 0.7 (giam ~33% kich thuoc so voi PNG)
+  // - Gui qua WebSocket (tranh overhead HTTP moi request)
+  const captureAndSend = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current || !ws || ws.readyState !== WebSocket.OPEN) return;
+
     const canvas = canvasRef.current;
-    if (!video || !canvas || video.readyState < 2) return;
+    const video = videoRef.current;
+    const context = canvas.getContext('2d');
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    // Scale down kich thuoc anh de giam payload va tang toc do xu ly
+    canvas.width = 640;
+    canvas.height = 480;
+    context?.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    ctx.drawImage(video, 0, 0);
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-      const formData = new FormData();
-      formData.append('frame', blob, 'frame.jpg');
-      formData.append('speech_detected', String(speechDetected));
+    // Dung JPEG chat luong 0.7 thay vi PNG de nhe hon
+    const base64Image = canvas.toDataURL('image/jpeg', 0.7);
 
-      try {
-        const res = await fetch(API_URL, { method: 'POST', body: formData });
-        const data: AnalyzeResult = await res.json();
-        setLastResult(data);
-      } catch (err) {
-        console.error('[ExamVAD] API error:', err);
-      }
-    }, 'image/jpeg', 0.8);
-  }, [videoRef]);
+    ws.send(JSON.stringify({
+      speech_detected: true,
+      timestamp: Date.now(),
+      image: base64Image
+    }));
+  }, [ws]);
 
-  // Cấu hình VAD
+  // ── Tich hop VAD voi THROTTLE ──────────────────────────────────────────
+  // BOTTLENECK FIX: Khong gui moi frame (30 FPS se lam nghen)
+  // Chi gui 2 frame/giay (moi 500ms) khi dang noi
   const vad = useMicVAD({
     startOnLoad: true,
     onSpeechStart: () => {
+      console.log('[VAD] User started speaking');
       setIsSpeaking(true);
-      captureAndSend(true);  // Capture ngay khi phát hiện giọng nói
+      // Gui frame dau tien ngay lap tuc
+      captureAndSend();
+      // Bat dau throttle: chi gui 2 frame / giay (moi 500ms) khi dang noi
+      captureIntervalRef.current = setInterval(captureAndSend, 500);
     },
     onSpeechEnd: () => {
+      console.log('[VAD] User stopped speaking');
       setIsSpeaking(false);
-      captureAndSend(false);
+      // Dung gui frame khi het noi
+      if (captureIntervalRef.current) {
+        clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
+      }
     },
     onVADMisfire: () => {
       setIsSpeaking(false);
-    },
+      if (captureIntervalRef.current) {
+        clearInterval(captureIntervalRef.current);
+        captureIntervalRef.current = null;
+      }
+    }
   });
 
-  return { isSpeaking, lastResult, vad };
+  return (
+    <div style={{ position: 'relative' }}>
+      <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', maxWidth: '640px' }} />
+      {/* Canvas an dung de lay frame */}
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
+      <div style={{
+        position: 'absolute', top: 10, right: 10, padding: '8px 16px',
+        background: isSpeaking ? '#ef4444' : '#22c55e',
+        color: 'white', borderRadius: '4px', fontWeight: 'bold'
+      }}>
+        VAD: {isSpeaking ? 'SPEAKING' : 'Silent'}
+      </div>
+    </div>
+  );
 };
 
-// ─── ExamMonitorPanel.tsx ── Component hiển thị trạng thái ──────────────────
-
-// import { useExamVAD } from './useExamVAD';
-//
-// export const ExamMonitorPanel: React.FC = () => {
-//   const videoRef = useRef<HTMLVideoElement>(null);
-//   const { isSpeaking, lastResult } = useExamVAD(videoRef);
-//
-//   useEffect(() => {
-//     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-//       .then(stream => { if (videoRef.current) videoRef.current.srcObject = stream; });
-//   }, []);
-//
-//   const levelColor = (level?: number) => {
-//     if (!level || level === 0) return '#22c55e';
-//     if (level === 1) return '#eab308';
-//     if (level === 2) return '#f97316';
-//     return '#ef4444';
-//   };
-//
-//   return (
-//     <div>
-//       <video ref={videoRef} autoPlay playsInline muted />
-//       <div style={{ background: isSpeaking ? '#ef4444' : '#22c55e', color: '#fff', padding: 8 }}>
-//         {isSpeaking ? 'Đang phát hiện giọng nói...' : 'Yên lặng'}
-//       </div>
-//       {lastResult && (
-//         <div style={{ background: levelColor(lastResult.level), color: '#fff', padding: 8 }}>
-//           [{lastResult.status}] {lastResult.message}
-//         </div>
-//       )}
-//     </div>
-//   );
-// };
+export default ExamMonitor;
 """
 
 # ╔════════════════════════════════════════════════════════════════════════════╗
@@ -326,11 +339,12 @@ class ExamFaceDetector:
 
         det = DetectionResult(face_count=len(bboxes), bboxes=bboxes, timestamp=time.monotonic())
 
-        # Phân tích MAR và Pose cho khuôn mặt đầu tiên (thí sinh chính)
+        # Phan tich MAR va Pose cho khuon mat LON NHAT (thi sinh chinh)
+        # Chon face co bounding box lon nhat thay vi faces[0]
         mm = MultimodalResult(face_count=len(bboxes), bboxes=bboxes)
 
         if faces:
-            face = faces[0]
+            face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
 
             # MAR từ landmark_2d_106
             lmk = getattr(face, "landmark_2d_106", None)
@@ -393,6 +407,21 @@ class ExamFaceDetector:
     @property
     def last_multimodal(self) -> MultimodalResult:
         return self._last_multimodal
+
+    @staticmethod
+    def decode_base64_image(base64_str: str) -> np.ndarray:
+        """
+        Decode anh base64 (tu frontend) thanh numpy array BGR.
+        Ho tro ca format 'data:image/jpeg;base64,...' va raw base64.
+        """
+        import base64 as b64mod
+        # Tach header 'data:image/jpeg;base64,' neu co
+        if "," in base64_str:
+            base64_str = base64_str.split(",", 1)[1]
+        img_data = b64mod.b64decode(base64_str)
+        np_arr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        return frame
 
 
 # ╔════════════════════════════════════════════════════════════════════════════╗
@@ -492,8 +521,71 @@ def analyze_cheating_behavior(
             details=details,
         )
 
-    # Fallback (không bao giờ đến đây theo logic trên)
-    return CheatingVerdict(status="UNKNOWN", message="Không xác định.", level=0, details=details)
+    # Fallback (khong bao gio den day theo logic tren)
+    return CheatingVerdict(status="UNKNOWN", message="Khong xac dinh.", level=0, details=details)
+
+
+class ExamCheatController:
+    """
+    Controller tong hop - dung cho WebSocket/API endpoint.
+    Nhan payload JSON tu frontend (base64 image + speech_detected),
+    decode anh, chay InsightFace, ap dung ma tran logic.
+
+    Su dung:
+        controller = ExamCheatController(mar_threshold=0.2, yaw_threshold=20.0)
+        result = controller.process_payload(payload_dict)
+    """
+
+    def __init__(
+        self,
+        model_root: str = "~/.insightface",
+        ctx_id: int = -1,
+        mar_threshold: float = 0.20,
+        yaw_threshold: float = 20.0,
+        pitch_threshold: float = 20.0,
+    ) -> None:
+        self.detector = ExamFaceDetector(
+            model_root=model_root,
+            ctx_id=ctx_id,
+            mar_threshold=mar_threshold,
+            yaw_threshold=yaw_threshold,
+            pitch_threshold=pitch_threshold,
+            throttle_interval=0.0,  # Khong throttle vi frontend da throttle 500ms
+        )
+
+    def process_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Xu ly payload JSON tu WebSocket/API.
+
+        payload = {
+            "speech_detected": true,
+            "image": "data:image/jpeg;base64,...",
+            "timestamp": 1234567890
+        }
+        """
+        speech_detected = payload.get("speech_detected", False)
+
+        # Khong co tieng noi -> bo qua, tiet kiem tai nguyen
+        if not speech_detected:
+            return {"status": "NORMAL", "message": "Binh thuong", "level": 0}
+
+        base64_image = payload.get("image")
+        if not base64_image:
+            return {"status": "ERROR", "message": "Thieu frame anh", "level": -1}
+
+        # Decode base64 -> numpy BGR
+        frame = ExamFaceDetector.decode_base64_image(base64_image)
+        if frame is None:
+            return {"status": "ERROR", "message": "Khong the decode anh", "level": -1}
+
+        # Chay cross-check
+        verdict = analyze_cheating_behavior(frame, speech_detected, self.detector)
+        return {
+            "status": verdict.status,
+            "message": verdict.message,
+            "level": verdict.level,
+            "details": verdict.details,
+        }
 
 
 # ╔════════════════════════════════════════════════════════════════════════════╗
@@ -586,21 +678,16 @@ _FONT_LABEL = _load_unicode_font(18)
 _FONT_SMALL = _load_unicode_font(14)
 
 
-def _put_text_unicode(
-    img: np.ndarray,
+def _put_text_pil(
+    draw: ImageDraw.ImageDraw,
     text: str,
     pos: tuple,
     font: ImageFont.FreeTypeFont,
     color_bgr: tuple,
-) -> np.ndarray:
-    """Ve text Unicode len anh OpenCV (BGR) bang PIL."""
-    pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(pil_img)
+) -> None:
+    """Ve text Unicode dung ImageDraw co san (tiet kiem chuyen doi)."""
     color_rgb = (color_bgr[2], color_bgr[1], color_bgr[0])
     draw.text(pos, text, font=font, fill=color_rgb)
-    result = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-    np.copyto(img, result)
-    return img
 
 
 # ── Bbox normalization ────────────────────────────────────────────────────
@@ -648,7 +735,7 @@ def _level_color(level: int) -> tuple:
 
 
 def _draw_overlay(frame: np.ndarray) -> np.ndarray:
-    """Ve status label, bbox, va panel multimodal len frame."""
+    """Ve status label, bbox, va panel multimodal len frame (da toi uu)."""
     display = frame.copy()
     h, w = display.shape[:2]
 
@@ -660,59 +747,58 @@ def _draw_overlay(frame: np.ndarray) -> np.ndarray:
         mm: Optional[MultimodalResult] = _overlay_state["multimodal"]
         speech_on = _overlay_state["speech_on"]
 
-    # ── Top banner (semi-transparent) ──────────────────────────────────────
+    # 1. Ve cac hinh khoi bang OpenCV (nhanh hon PIL)
+    # Top banner
     overlay = display.copy()
     cv2.rectangle(overlay, (0, 0), (w, 50), (20, 20, 20), -1)
     cv2.addWeighted(overlay, 0.6, display, 0.4, 0, display)
-    _put_text_unicode(display, label, (16, 12), _FONT_BANNER, color)
 
-    # ── Bounding box ──────────────────────────────────────────────────────
+    # Bounding box
     if bbox is not None:
         x1, y1, x2, y2 = _normalize_bbox_to_frame(bbox, w, h)
         cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
-        _put_text_unicode(display, "Thi sinh", (x1, max(y1 - 24, 2)), _FONT_LABEL, color)
 
-    # ── Panel Multimodal (goc duoi ben trai) ──────────────────────────────
-    panel_w = 420
-    panel_h = 130
-    panel_y = h - panel_h - 10
-    panel_x = 10
-
-    # Semi-transparent panel background
+    # Panel Multimodal
+    panel_w, panel_h = 420, 130
+    panel_y, panel_x = h - panel_h - 10, 10
     panel_overlay = display.copy()
     cv2.rectangle(panel_overlay, (panel_x, panel_y), (panel_x + panel_w, panel_y + panel_h), (20, 20, 20), -1)
     cv2.addWeighted(panel_overlay, 0.7, display, 0.3, 0, display)
 
-    # Speech status indicator
-    speech_color = (0, 0, 255) if speech_on else (0, 220, 80)
-    speech_text = "[S] Speech: ON  (nhan 's' de tat)" if speech_on else "[S] Speech: OFF (nhan 's' de bat)"
-    _put_text_unicode(display, speech_text, (panel_x + 8, panel_y + 8), _FONT_SMALL, speech_color)
+    # 2. Chuyen sang PIL 1 LAN DUY NHAT de ve toan bo text Unicode
+    pil_img = Image.fromarray(cv2.cvtColor(display, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil_img)
 
-    # MAR & Pose info
+    # Ve status label
+    _put_text_pil(draw, label, (16, 12), _FONT_BANNER, color)
+
+    # Ve nhan "Thi sinh"
+    if bbox is not None:
+        x1, y1, x2, y2 = _normalize_bbox_to_frame(bbox, w, h)
+        _put_text_pil(draw, "Thi sinh", (x1, max(y1 - 24, 2)), _FONT_LABEL, color)
+
+    # Ve thong tin speech
+    speech_color = (0, 0, 255) if speech_on else (0, 220, 80)
+    speech_text = "[S] Speech: ON" if speech_on else "[S] Speech: OFF"
+    _put_text_pil(draw, speech_text, (panel_x + 8, panel_y + 8), _FONT_SMALL, speech_color)
+
     if mm is not None and mm.face_count > 0:
         mar_text = f"MAR: {mm.mar_value:.3f} | Mouth: {'OPEN' if mm.is_mouth_open else 'Closed'}"
-        _put_text_unicode(display, mar_text, (panel_x + 8, panel_y + 32), _FONT_SMALL, (200, 200, 200))
-
-        pose_text = f"Yaw: {mm.yaw:.1f}  Pitch: {mm.pitch:.1f}  Roll: {mm.roll:.1f}"
-        look_color = (0, 0, 255) if mm.is_looking_away else (0, 220, 80)
-        look_text = " | LOOKING AWAY!" if mm.is_looking_away else " | OK"
-        _put_text_unicode(display, pose_text + look_text, (panel_x + 8, panel_y + 56), _FONT_SMALL, look_color)
+        _put_text_pil(draw, mar_text, (panel_x + 8, panel_y + 32), _FONT_SMALL, (200, 200, 200))
+        pose_text = f"Yaw: {mm.yaw:.1f}  Pitch: {mm.pitch:.1f}  Look: {'AWAY' if mm.is_looking_away else 'OK'}"
+        _put_text_pil(draw, pose_text, (panel_x + 8, panel_y + 56), _FONT_SMALL, (0, 0, 255) if mm.is_looking_away else (0, 220, 80))
     else:
-        _put_text_unicode(display, "MAR: --- | Pose: ---", (panel_x + 8, panel_y + 32), _FONT_SMALL, (120, 120, 120))
+        _put_text_pil(draw, "MAR: --- | Pose: ---", (panel_x + 8, panel_y + 32), _FONT_SMALL, (120, 120, 120))
 
-    # Verdict
     if verdict is not None and speech_on:
-        v_color = _level_color(verdict.level)
-        v_text = f"[Lv.{verdict.level}] {verdict.message}"
-        _put_text_unicode(display, v_text, (panel_x + 8, panel_y + 85), _FONT_LABEL, v_color)
+        _put_text_pil(draw, f"[Lv.{verdict.level}] {verdict.message}", (panel_x + 8, panel_y + 85), _FONT_LABEL, _level_color(verdict.level))
     else:
-        _put_text_unicode(display, "Khong co tieng noi - Binh thuong", (panel_x + 8, panel_y + 85), _FONT_LABEL, _COLOR_NORMAL)
+        _put_text_pil(draw, "Binh thuong", (panel_x + 8, panel_y + 85), _FONT_LABEL, _COLOR_NORMAL)
 
-    # Hotkey hint (goc duoi phai)
-    hint = "Q: Thoat | S: Toggle Speech"
-    _put_text_unicode(display, hint, (w - 280, h - 25), _FONT_SMALL, (150, 150, 150))
+    _put_text_pil(draw, "Q: Thoat | S: Toggle Speech", (w - 250, h - 25), _FONT_SMALL, (150, 150, 150))
 
-    return display
+    # 3. Chuyen nguoc lai BGR
+    return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 
 # ── Main monitor loop ─────────────────────────────────────────────────────
@@ -725,13 +811,9 @@ def run_monitor(
     simulate_speech: bool = False,
 ) -> None:
     """
-    Khoi chay vong lap giam sat camera voi giao dien multimodal.
-
-    Phim tat:
-      - 's': Toggle simulate speech (bat/tat gia lap co tieng noi)
-      - 'q' / ESC: Thoat
+    Khoi chay vong lap giam sat camera voi giao dien multimodal (Threaded).
     """
-    print("[ExamMonitor] Khoi tao ExamFaceDetector (Multimodal)...")
+    print("[ExamMonitor] Khoi tao ExamFaceDetector (Threaded)...")
 
     detector = ExamFaceDetector(
         model_root=model_root,
@@ -750,9 +832,39 @@ def run_monitor(
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    cap.set(cv2.CAP_PROP_FPS, 30)
+    
+    # State cho threading
+    shared_data = {
+        "frame": None,
+        "speech_on": simulate_speech,
+        "running": True
+    }
 
-    speech_on = simulate_speech
+    def inference_worker():
+        """Luong xu ly AI chay song song."""
+        print("[ExamMonitor] Inference thread started.")
+        while shared_data["running"]:
+            if shared_data["frame"] is not None:
+                # Lay frame moi nhat de xu ly
+                f = shared_data["frame"].copy()
+                s_on = shared_data["speech_on"]
+                
+                # Chay AI
+                mm = detector.process_frame_multimodal(f)
+                verdict = analyze_cheating_behavior(f, s_on, detector)
+                
+                # Cap nhat overlay state
+                with _overlay_lock:
+                    _overlay_state["verdict"] = verdict
+                    _overlay_state["multimodal"] = mm
+                    _overlay_state["speech_on"] = s_on
+            
+            time.sleep(0.01)
+
+    # Chay thread inference
+    thread = threading.Thread(target=inference_worker, daemon=True)
+    thread.start()
+
     frame_count = 0
     fps_timer = time.monotonic()
 
@@ -762,51 +874,35 @@ def run_monitor(
         while True:
             ret, frame = cap.read()
             if not ret:
-                print("[ExamMonitor] Mat ket noi camera, thu lai...")
                 time.sleep(0.1)
                 continue
 
-            # ── Chay multimodal inference ──────────────────────────────────
-            mm: MultimodalResult = detector.process_frame_multimodal(frame)
+            # Day frame vao queue cho thread inference
+            shared_data["frame"] = frame
 
-            # ── Cross-check logic ──────────────────────────────────────────
-            verdict: CheatingVerdict = analyze_cheating_behavior(
-                frame, speech_on, detector
-            )
-
-            # ── Cap nhat overlay state ─────────────────────────────────────
-            with _overlay_lock:
-                _overlay_state["verdict"] = verdict
-                _overlay_state["multimodal"] = mm
-                _overlay_state["speech_on"] = speech_on
-
-            # ── Tinh FPS ───────────────────────────────────────────────────
+            # Tinh FPS hiển thị
             frame_count += 1
             elapsed = time.monotonic() - fps_timer
             if elapsed >= 2.0:
                 fps = frame_count / elapsed
-                print(
-                    f"[ExamMonitor] FPS: {fps:.1f} | "
-                    f"Faces: {mm.face_count} | "
-                    f"MAR: {mm.mar_value:.3f} | "
-                    f"Speech: {'ON' if speech_on else 'OFF'} | "
-                    f"Verdict: Lv.{verdict.level}"
-                )
+                print(f"[ExamMonitor] Display FPS: {fps:.1f}")
                 frame_count = 0
                 fps_timer = time.monotonic()
 
-            # ── Hien thi ──────────────────────────────────────────────────
+            # Hien thi luon frame hien tai voi ket qua AI moi nhat (khong cho doi)
             display = _draw_overlay(frame)
-            cv2.imshow("SecureExam - Giam sat thi cu (Multimodal)", display)
+            cv2.imshow("SecureExam - Multimodal AI (Optimized)", display)
+            
             key = cv2.waitKey(1) & 0xFF
-
-            if key == ord("q") or key == 27:  # 'q' hoac ESC
+            if key == ord("q") or key == 27:
                 break
-            if key == ord("s"):  # Toggle simulate speech
-                speech_on = not speech_on
-                print(f"[ExamMonitor] Speech simulate: {'ON' if speech_on else 'OFF'}")
+            if key == ord("s"):
+                shared_data["speech_on"] = not shared_data["speech_on"]
+                print(f"[ExamMonitor] Speech: {'ON' if shared_data['speech_on'] else 'OFF'}")
 
     finally:
+        shared_data["running"] = False
+        thread.join(timeout=1.0)
         cap.release()
         cv2.destroyAllWindows()
         print("[ExamMonitor] Da dung.")
