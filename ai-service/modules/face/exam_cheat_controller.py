@@ -15,6 +15,7 @@ Logic nghiệp vụ:
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import deque
@@ -22,6 +23,8 @@ from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, Optional, Tuple
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from modules.face.exam_face_detector import (
     ExamFaceDetector,
@@ -72,16 +75,14 @@ class SessionState:
     """
     State riêng biệt cho mỗi session/user.
 
-    mar_history: Lưu lịch sử MAR thô của 5 frame gần nhất.
-        - Với frontend throttle 500ms → 5 frames ≈ 2.5 giây.
-        - Đủ nhanh để cảnh báo kịp thời, đủ dữ liệu tính Variance.
-
-    speech_start_time: Thời điểm (monotonic) bắt đầu nhận speech_detected=True.
-        - Dùng để tính duration cho debounce 1.5s.
-        - Reset về 0.0 khi speech_detected=False.
+    mar_history: Lưu lịch sử MAR thô của 20 frame gần nhất.
+        - Buffer lớn đảm bảo luôn chứa giá trị "miệng đóng" làm baseline,
+          kể cả khi thí sinh nói liên tục 10-15 giây.
+        - Với 1 frame/giây (im lặng) hoặc 2 frame/giây (đang nói),
+          20 frames ≈ 10-20 giây lịch sử.
     """
     mar_history: Deque[float] = field(
-        default_factory=lambda: deque(maxlen=5)
+        default_factory=lambda: deque(maxlen=20)
     )
     speech_start_time: float = 0.0
     last_activity: float = field(default_factory=time.monotonic)
@@ -123,8 +124,8 @@ class ExamCheatController:
         self,
         model_root: str = "~/.insightface",
         ctx_id: int = -1,
-        yaw_threshold: float = 30.0,
-        pitch_threshold: float = 20.0,
+        yaw_threshold: float = 20.0,    # Đã giảm từ 30.0 để tăng độ nhạy quay ngang
+        pitch_threshold: float = 15.0,  # Đã giảm từ 20.0 để tăng độ nhạy cúi/ngửa
         mar_variance_threshold: float = 0.001,
         speech_debounce_seconds: float = 1.5,
         session_timeout: float = 3600.0,  # 1 giờ
@@ -180,6 +181,52 @@ class ExamCheatController:
         with self._sessions_lock:
             return len(self._sessions)
 
+    # ── Mouth Movement Evaluation ────────────────────────────
+    def evaluate_mouth_movement(
+        self, session_id: str, current_mar: float
+    ) -> Tuple[bool, float]:
+        """
+        Đánh giá miệng có đang CỬ ĐỘNG hay không bằng 2 bộ kiểm tra song song.
+
+        Bộ 1 – Delta dài hạn (20 frames):
+          baseline = min(20 frames gần nhất)
+          delta = current_mar - baseline
+          Nếu delta > 0.08 → miệng đang mở hơn bình thường.
+          → Bắt được lúc BẮT ĐẦU nói (buffer vẫn có frames im lặng).
+
+        Bộ 2 – Biên độ dao động ngắn hạn (5 frames):
+          range = max(5 frames) - min(5 frames)
+          Nếu range > 0.06 → miệng đang dao động (mở-đóng theo nhịp nói).
+          → Bắt được lúc NÓI LIÊN TỤC (kể cả khi buffer toàn frame nói).
+          → Khi mím chặt môi, jitter chỉ tạo range ≈ 0.02-0.04 < 0.06.
+
+        Miệng = đang cử động nếu BẤT KỲ bộ nào True.
+        """
+        state = self._get_or_create_session(session_id)
+        history_all = list(state.mar_history)
+
+        if len(history_all) < 3:
+            return False, 0.0
+
+        # ── Bộ 1: Delta dài hạn (toàn bộ buffer 20 frames) ──
+        baseline = min(history_all)
+        delta = current_mar - baseline
+        check_delta = delta > 0.08
+
+        # ── Bộ 2: Biên độ dao động ngắn hạn (5 frames gần nhất) ──
+        recent = history_all[-5:]
+        mar_range = max(recent) - min(recent)
+        check_range = mar_range > 0.06
+
+        is_moving = check_delta or check_range
+
+        logger.info(
+            "[CheatCtrl] MAR=%.4f | delta=%.4f (>0.08?%s) | range_5f=%.4f (>0.06?%s) -> is_moving=%s",
+            current_mar, delta, check_delta, mar_range, check_range, is_moving,
+        )
+
+        return is_moving, delta
+
     # ── Cross-check Analysis ──────────────────────────────────────────────────
     def process_payload(
         self,
@@ -222,16 +269,21 @@ class ExamCheatController:
         # Chạy inference multimodal
         mm: MultimodalResult = self.detector.process_frame_multimodal(frame)
 
+        # Cập nhật MAR vào buffer của session
+        state.mar_history.append(mm.mar_value)
+
+        # Đánh giá miệng mở (baseline động)
+        is_mouth_moving, mar_delta = self.evaluate_mouth_movement(session_id, mm.mar_value)
+
         # Cập nhật state (để dọn dẹp stale sessions)
         state.last_activity = time.monotonic()
-
-        is_mouth_open = mm.is_mouth_open
 
         # Build chi tiết cho response
         details: Dict[str, Any] = {
             "face_count": mm.face_count,
             "mar_value": round(mm.mar_value, 4),
-            "is_mouth_open": is_mouth_open,
+            "mar_delta": round(mar_delta, 4),
+            "is_mouth_moving": is_mouth_moving,
             "is_looking_away": mm.is_looking_away,
             "pose": {
                 "pitch": round(mm.pitch, 2),
@@ -261,7 +313,13 @@ class ExamCheatController:
         if not speech_detected:
             return self._build_verdict(LEVEL_NORMAL, details=details)
 
-        if is_mouth_open:
+        # Log quyết định để debug
+        logger.info(
+            "[CheatCtrl] DECISION: speech=%s mouth_moving=%s looking_away=%s (yaw=%.1f pitch=%.1f)",
+            speech_detected, is_mouth_moving, mm.is_looking_away, mm.yaw, mm.pitch,
+        )
+
+        if is_mouth_moving:
             if mm.is_looking_away:
                 # speech=True, mouth=True, away=True
                 return self._build_verdict(LEVEL_WARNING_L1, message="Thí sinh đang quay sang nói chuyện", details=details)

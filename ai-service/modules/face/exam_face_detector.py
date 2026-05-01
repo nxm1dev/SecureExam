@@ -24,8 +24,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+import logging
+
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Type aliases cho callback signatures
@@ -191,9 +195,10 @@ class ExamFaceDetector:
         self._app = FaceAnalysis(
             name="buffalo_l",
             root=self._model_root,
-            # QUAN TRỌNG: Thêm 'landmark_2d_106' để có 106 điểm landmark
-            # cho tính MAR và head pose estimation
-            allowed_modules=["detection", "landmark_2d_106"],
+            # QUAN TRỌNG:
+            #   - landmark_2d_106: 106 điểm landmark cho tính MAR
+            #   - landmark_3d_68:  cung cấp face.pose (pitch/yaw/roll)
+            allowed_modules=["detection", "landmark_2d_106", "landmark_3d_68"],
         )
         self._app.prepare(
             ctx_id=self._ctx_id,
@@ -336,13 +341,21 @@ class ExamFaceDetector:
                 mm.has_landmarks = True
                 mm.mar_value = self.calculate_mar(lmk)
                 mm.is_mouth_open = mm.mar_value > 0.10
+            else:
+                logger.warning("[FaceDetector] landmark_2d_106 is None!")
 
-            # Head Pose
+            # Head Pose (từ landmark_3d_68)
             pose = getattr(face, "pose", None)
             if pose is not None:
                 mm.is_looking_away, (mm.pitch, mm.yaw, mm.roll) = (
                     self.analyze_pose(pose)
                 )
+                logger.debug(
+                    "[FaceDetector] MAR=%.4f | yaw=%.1f pitch=%.1f roll=%.1f | looking_away=%s",
+                    mm.mar_value, mm.yaw, mm.pitch, mm.roll, mm.is_looking_away,
+                )
+            else:
+                logger.warning("[FaceDetector] face.pose is None — landmark_3d_68 not loaded?")
 
         return det, mm
 
