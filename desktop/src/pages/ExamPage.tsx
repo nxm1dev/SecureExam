@@ -57,8 +57,6 @@ export default function ExamPage({
   const focusTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isCancelledRef = useRef(false);
 
-  // ── Lockdown error ──────────────────────────────────────────────
-  const [lockdownError, setLockdownError] = useState<string | null>(null);
 
   // ── Violations ─────────────────────────────────────────────────
   const { violations, addViolation, flushViolations } = useViolations({
