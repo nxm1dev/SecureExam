@@ -114,6 +114,7 @@ async function activateLockdown(): Promise<{ success: boolean; error?: string }>
   }
 
   // ── Check VM ───────────────────────────────────────────────────
+  /*
   const vmResult = await detectVirtualMachine();
   if (vmResult.isVM) {
     mainWindow.webContents.send("vm-detected", vmResult.indicators);
@@ -128,6 +129,7 @@ async function activateLockdown(): Promise<{ success: boolean; error?: string }>
       error: "Phát hiện máy ảo. Không thể thi trên máy ảo.",
     };
   }
+  */
 
   // ── Activate Kiosk ────────────────────────────────────────────
   enterKioskMode();
