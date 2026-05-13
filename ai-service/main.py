@@ -21,15 +21,15 @@ log = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("SecureExam AI Service starting", port=8001)
+    log.info("Exam Anti-cheating AI Service starting", port=8001)
     # Pre-warm models in background (optional – avoids cold-start latency)
     # Could trigger get_analyzer()._load_model() here in a thread
     yield
-    log.info("SecureExam AI Service stopped")
+    log.info("Exam Anti-cheating AI Service stopped")
 
 
 app = FastAPI(
-    title="SecureExam AI Service",
+    title="Exam Anti-cheating AI Service",
     description="Real-time face and audio analysis for exam proctoring",
     version="1.0.0",
     lifespan=lifespan,

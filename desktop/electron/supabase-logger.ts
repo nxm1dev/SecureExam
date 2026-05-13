@@ -65,7 +65,7 @@ function shouldFlushUrgently(violation: PendingViolation): boolean {
 }
 
 function getQueueDir(): string {
-  const dir = path.join(app.getPath("userData"), "secureexam-queue");
+  const dir = path.join(app.getPath("userData"), "examac-queue");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }

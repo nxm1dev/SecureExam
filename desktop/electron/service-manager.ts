@@ -43,7 +43,7 @@ function getServiceLogTail(serviceName: string) {
 }
 
 function getPythonCandidates(): PythonLauncher[] {
-  const configuredPython = process.env.SECUREEXAM_PYTHON;
+  const configuredPython = process.env.EXAMAC_PYTHON;
   const candidates: PythonLauncher[] = [];
 
   if (configuredPython) {
@@ -208,7 +208,7 @@ export async function ensurePackagedServicesReady() {
   const aiServiceDir = path.join(runtimeRoot, "ai-service");
   const configDir = path.join(runtimeRoot, "config");
   const dataRoot = path.join(app.getPath("userData"), "runtime");
-  const dbPath = path.join(dataRoot, "secureexam.db");
+  const dbPath = path.join(dataRoot, "examac.db");
   const modelCacheDir = path.join(dataRoot, "ai-model-cache");
 
   ensureDirectory(dataRoot);
@@ -224,7 +224,7 @@ export async function ensurePackagedServicesReady() {
     const backendProcess = spawnService("backend", python, backendDir, BACKEND_PORT, {
       DATABASE_URL: toSqliteUrl(dbPath),
       AI_SERVICE_URL: SERVICE_URLS.ai,
-      SECUREEXAM_CONFIG_DIR: configDir,
+      EXAMAC_CONFIG_DIR: configDir,
     });
     await waitForHealth("backend", `${SERVICE_URLS.backend}/health`, backendProcess);
   }
@@ -232,7 +232,7 @@ export async function ensurePackagedServicesReady() {
   if (!aiHealthy) {
     const aiProcess = spawnService("ai-service", python, aiServiceDir, AI_SERVICE_PORT, {
       MODEL_CACHE_DIR: modelCacheDir,
-      SECUREEXAM_CONFIG_DIR: configDir,
+      EXAMAC_CONFIG_DIR: configDir,
     });
     await waitForHealth("ai-service", `${SERVICE_URLS.ai}/health`, aiProcess);
   }

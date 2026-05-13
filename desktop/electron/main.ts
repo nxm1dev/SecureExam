@@ -400,7 +400,7 @@ async function bootstrapApp() {
     await ensurePackagedServicesReady();
   } catch (error: any) {
     dialog.showErrorBox(
-      "SecureExam startup failed",
+      "Exam Anti-cheating startup failed",
       error?.message || "Khong the khoi dong backend va AI service."
     );
     app.quit();

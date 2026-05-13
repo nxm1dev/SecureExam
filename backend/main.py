@@ -26,16 +26,16 @@ async def lifespan(app: FastAPI):
     Startup: ensure the database schema exists.
     Shutdown: dispose DB engine pool.
     """
-    log.info("SecureExam Backend starting", port=8000)
+    log.info("Exam Anti-cheating Backend starting", port=8000)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
     await engine.dispose()
-    log.info("SecureExam Backend stopped")
+    log.info("Exam Anti-cheating Backend stopped")
 
 
 app = FastAPI(
-    title="SecureExam Backend",
+    title="Exam Anti-cheating Backend",
     description="Anti-fraud exam session management API",
     version="1.0.0",
     lifespan=lifespan,

@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings
 
 
 def _discover_config_dir() -> Path:
-    env_dir = os.getenv("SECUREEXAM_CONFIG_DIR")
+    env_dir = os.getenv("EXAMAC_CONFIG_DIR")
     if env_dir:
         return Path(env_dir)
 
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = (
-        "postgresql+asyncpg://secureexam:secureexam_pass@localhost:5432/secureexam"
+        "postgresql+asyncpg://examac:examac_pass@localhost:5432/examac"
     )
 
     # AI service URL
@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     # CORS – desktop app origin
     cors_origins: list[str] = [
         "http://localhost:3000",
-        "app://SecureExam",
+        "app://ExamAC",
         "file://",
         "null",
     ]

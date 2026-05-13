@@ -1,8 +1,8 @@
 # ============================================================
-# SecureExam – Global Application Configuration
+# Exam Anti-cheating – Global Application Configuration
 # ============================================================
 app:
-  name: "SecureExam"
+  name: "Exam Anti-cheating"
   version: "1.0.0"
 
 # Local service ports

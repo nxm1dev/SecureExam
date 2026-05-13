@@ -1,5 +1,5 @@
 -- ============================================================
--- SecureExam Database Schema
+-- Exam Anti-cheating Database Schema
 -- PostgreSQL 15
 -- ============================================================
 
@@ -71,5 +71,5 @@ CREATE INDEX IF NOT EXISTS idx_sessions_status     ON sessions(status);
 -- Seed admin user for local dev
 -- ──────────────────────────────────────────
 INSERT INTO users (email, full_name, role)
-VALUES ('admin@secureexam.local', 'Admin', 'admin')
+VALUES ('admin@examac.local', 'Admin', 'admin')
 ON CONFLICT DO NOTHING;

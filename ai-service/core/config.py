@@ -21,7 +21,7 @@ def _discover_repo_root() -> Path:
 
 
 def _discover_config_dir() -> Path:
-    env_dir = os.getenv("SECUREEXAM_CONFIG_DIR")
+    env_dir = os.getenv("EXAMAC_CONFIG_DIR")
     if env_dir:
         return Path(env_dir)
     return _discover_repo_root() / "config"
@@ -53,7 +53,7 @@ class AISettings(BaseSettings):
     # CORS origins (desktop app)
     cors_origins: list[str] = [
         "http://localhost:3000",
-        "app://SecureExam",
+        "app://ExamAC",
         "file://",
         "null",
     ]

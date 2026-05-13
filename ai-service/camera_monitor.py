@@ -313,7 +313,7 @@ def run_monitor(camera_index=0, model_root="~/.insightface", ctx_id=-1, simulate
         
         with _overlay_lock: _overlay_state["cheating"] = cheating
         
-        cv2.imshow("SecureExam Monitor", _draw_overlay(frame))
+        cv2.imshow("Exam Anti-cheating Monitor", _draw_overlay(frame))
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'): break
         if key == ord('s'): speech_on = not speech_on

@@ -36,7 +36,7 @@ let storeDir: string | null = null;
 
 function getStoreDir(): string {
   if (!storeDir) {
-    storeDir = path.join(app.getPath("userData"), "secureexam-reports");
+    storeDir = path.join(app.getPath("userData"), "examac-reports");
     fs.mkdirSync(storeDir, { recursive: true });
   }
   return storeDir;

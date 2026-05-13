@@ -1,7 +1,7 @@
 {
   "name": "secure-exam-desktop",
   "version": "1.0.0",
-  "description": "SecureExam – Anti-fraud exam desktop application",
+  "description": "Exam Anti-cheating – Anti-fraud exam desktop application",
   "main": "dist/electron/main.js",
   "scripts": {
     "predev": "node scripts/kill-port.js 3000",
@@ -43,8 +43,8 @@
     "webpack-dev-server": "^5.0.4"
   },
   "build": {
-    "appId": "com.secureexam.desktop",
-    "productName": "SecureExam",
+    "appId": "com.examac.desktop",
+    "productName": "Exam Anti-cheating",
     "directories": {
       "output": "release"
     },

@@ -1,5 +1,5 @@
 # ============================================================
-# SecureExam – URL Whitelist Configuration
+# Exam Anti-cheating – URL Whitelist Configuration
 # Only these URLs (and their sub-paths) are allowed in exam.
 # ============================================================
 whitelist:
