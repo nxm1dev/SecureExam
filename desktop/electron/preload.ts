@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // ── Report ──────────────────────────────────────────────────────
   getReport: (sessionId: string) => ipcRenderer.invoke("report:get", sessionId),
+  getLocalReport: (sessionId: string) => ipcRenderer.invoke("report:getLocal", sessionId),
+  deleteLocalReport: (sessionId: string) => ipcRenderer.invoke("report:deleteLocal", sessionId),
 
   // ── Video upload ────────────────────────────────────────────────
   uploadViolationVideo: (sessionId: string, violationId: string, videoBase64: string) =>

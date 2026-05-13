@@ -19,7 +19,7 @@ const api = (window as any).electronAPI;
 const EXAM_RULES = [
   "Luôn ngồi một mình trong khung hình và giữ khuôn mặt rõ nét.",
   "Không chuyển tab, không mở thêm phần mềm, không rời màn hình thi.",
-  "Mọi cảnh báo mức 2 sẽ được lưu kèm mốc thời gian để giám sát lại.",
+  "Mọi cảnh báo mức 2 trở lên sẽ được lưu kèm mốc thời gian để giám sát lại.",
 ];
 
 const EXAM_STEPS = [
@@ -33,7 +33,7 @@ const EXAM_STEPS = [
   },
   {
     title: "Bắt đầu giám sát",
-    description: "Camera, micro và chế độ khóa màn hình sẽ được kích hoạt trước khi làm bài.",
+    description: "Camera, micro và chế độ khóa màn hình sẽ được kích hoạt khi làm bài.",
   },
 ];
 
@@ -125,12 +125,7 @@ export default function SetupPage({ onExamStart, onTestMode }: Props) {
 
       <div style={styles.shell}>
         <section style={styles.heroPanel}>
-          <div style={styles.heroBadge}>SecureExam dành cho thí sinh</div>
-          <h1 style={styles.heroTitle}>Vào thi trong một giao diện rõ ràng, gọn và không còn khoảng trống thừa.</h1>
-          <p style={styles.heroCopy}>
-            Hệ thống sẽ kiểm tra thông tin thí sinh, mở đúng đường dẫn bài thi và kích hoạt giám sát trước
-            khi bạn bắt đầu làm bài. Toàn bộ nội dung hiển thị đã được chuẩn hóa sang tiếng Việt.
-          </p>
+          <div style={styles.heroBadge}>EA - Exam Anti-cheating</div>
 
           <div style={styles.heroStats}>
             <div style={styles.heroStatCard}>
@@ -139,7 +134,7 @@ export default function SetupPage({ onExamStart, onTestMode }: Props) {
             </div>
             <div style={styles.heroStatCard}>
               <span style={styles.heroStatLabel}>Điều kiện lưu cảnh báo</span>
-              <strong style={styles.heroStatValue}>Chỉ lưu cảnh báo mức 2</strong>
+              <strong style={styles.heroStatValue}>cảnh báo sẽ được lưu từ mức 2 trở lên</strong>
             </div>
           </div>
 
@@ -172,7 +167,6 @@ export default function SetupPage({ onExamStart, onTestMode }: Props) {
           <div style={styles.formHeader}>
             <div>
               <div style={styles.formEyebrow}>Phiên thi mới</div>
-              <h2 style={styles.formTitle}>Khai báo thông tin và mở bài thi</h2>
             </div>
             <div style={styles.statusChip}>
               {isRegistered ? "Đã xác thực" : "Chờ xác thực"}

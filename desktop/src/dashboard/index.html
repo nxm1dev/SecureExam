@@ -620,26 +620,30 @@
     }
 
     const EVENT_LABELS = {
-      app_focus_lost: "Rời cửa sổ thi",
-      fullscreen_exit: "Thoát toàn màn hình",
-      blocked_shortcut: "Phím tắt bị chặn",
-      blacklisted_process: "Ứng dụng bị cấm",
-      multi_monitor_blocked: "Đa màn hình trước khi thi",
-      multi_monitor_connected: "Gắn thêm màn hình",
-      vm_detected: "Phát hiện máy ảo",
+      ai_cheating_l2: "AI: Nhắc bài / Nhìn tài liệu",
+      ai_cheating_l1: "AI: Nói chuyện / Trao đổi",
+      ai_cheating_mild: "AI: Đọc nhẩm",
       no_face: "Không thấy khuôn mặt",
       multiple_faces: "Nhiều khuôn mặt",
-      identity_mismatch: "Sai định danh",
-      voice_overlap: "Nhiều người nói cùng lúc",
-      ai_cheating_mild: "Đọc nhẩm / tiếng nói nhỏ",
-      ai_cheating_l1: "Nói chuyện bất thường",
-      ai_cheating_l2: "Nghi nhắc bài",
-      exam_cancelled: "Hủy bài thi",
-      exam_auto_submit: "Nộp bài tự động",
+      identity_mismatch: "Không khớp danh tính",
+      speech_detected: "Phát hiện giọng nói",
+      voice_overlap: "Chồng giọng",
+      rapid_voice_change: "Thay đổi giọng đột ngột",
+      app_focus_lost: "Rời cửa sổ thi",
+      blocked_shortcut: "Phím tắt bị chặn",
+      blacklisted_process: "Ứng dụng bị cấm",
+      fullscreen_exit: "Thoát toàn màn hình",
+      app_close_attempt: "Cố đóng cửa sổ",
+      multi_monitor_blocked: "Nhiều màn hình (khóa)",
+      multi_monitor_connected: "Cắm thêm màn hình",
+      exam_cancelled: "Hủy thi do vi phạm",
+      exam_auto_submit: "Tự động nộp bài",
       exam_submitted: "Thí sinh nộp bài",
-      url_blocked: "URL bị chặn",
-      popup_attempt: "Mở popup",
-      process_killed: "Đóng ứng dụng bị cấm"
+      tab_switch: "Chuyển ứng dụng",
+      url_blocked: "Truy cập URL bị chặn",
+      popup_attempt: "Cố mở tab/popup",
+      vm_detected: "Phát hiện máy ảo",
+      process_killed: "Ứng dụng cấm bị tắt"
     };
 
     const state = {
@@ -931,11 +935,9 @@
           }),
           supabaseSelect("exam_violations", {
             select: "id,session_id,event_type,severity,message,occurred_at",
-            filters: {
-              event_type: "in.(ai_cheating_l2,multiple_faces,no_face)"
-            },
+            filters: {},
             order: { column: "occurred_at", ascending: false },
-            limit: 10
+            limit: 15
           })
         ]);
 
@@ -991,8 +993,7 @@
       try {
         const violations = await supabaseSelect("exam_violations", {
           filters: {
-            session_id: `eq.${sessionId}`,
-            event_type: "in.(ai_cheating_l2,multiple_faces,no_face)"
+            session_id: `eq.${sessionId}`
           },
           order: { column: "occurred_at", ascending: true }
         });

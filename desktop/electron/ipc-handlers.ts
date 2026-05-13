@@ -11,6 +11,7 @@ import {
   queueVideoUpload,
 } from "./supabase-logger";
 import { shouldPersistViolation } from "./violation-policy";
+import { getSessionReport, deleteSessionReport } from "./violation-store";
 
 type ExamStartConfig = {
   userId: string;
@@ -78,6 +79,10 @@ export function registerIpcHandlers(options: RegisterHandlersOptions = {}): void
     medium_count?: number;
     low_count?: number;
   }) => {
+    // 1. NGAY LẬP TỨC giải phóng giao diện: tắt fullscreen, cho phép Alt+Tab, huỷ các phím chặn...
+    options.onExamEnded?.();
+
+    // 2. Chạy ngầm các tác vụ dọn dẹp API và gửi dữ liệu lên server
     const { data } = await axios.post(`${backendUrl}/sessions/${sessionId}/end`, {
       status: "completed",
       ...(violationCounts || {}),
@@ -95,12 +100,15 @@ export function registerIpcHandlers(options: RegisterHandlersOptions = {}): void
       console.error("[IPC] Supabase logging failed (non-blocking):", err.message);
     }
 
-    options.onExamEnded?.();
     return data;
   });
 
   // ── Exam Cancel (auto-cancel due to violations) ────────────────
   ipcMain.handle("exam:cancel", async (_event, sessionId: string, reason: string) => {
+    // 1. NGAY LẬP TỨC giải phóng giao diện
+    options.onExamCancelled?.(sessionId, reason);
+
+    // 2. Chạy ngầm việc gửi trạng thái huỷ lên server
     try {
       await axios.post(`${backendUrl}/sessions/${sessionId}/end`, {
         status: "cancelled",
@@ -118,7 +126,6 @@ export function registerIpcHandlers(options: RegisterHandlersOptions = {}): void
       message: reason,
     });
 
-    options.onExamCancelled?.(sessionId, reason);
     return { success: true };
   });
 
@@ -280,4 +287,14 @@ export function registerIpcHandlers(options: RegisterHandlersOptions = {}): void
       return { success: true };
     }
   );
+
+  // ── Local Report (from persistent local store) ─────────────────
+  ipcMain.handle("report:getLocal", (_event, sessionId: string) => {
+    return getSessionReport(sessionId);
+  });
+
+  ipcMain.handle("report:deleteLocal", (_event, sessionId: string) => {
+    deleteSessionReport(sessionId);
+    return { success: true };
+  });
 }

@@ -1,4 +1,4 @@
-import { app, BrowserView, BrowserWindow, dialog, ipcMain, screen, session } from "electron";
+import { app, BrowserView, BrowserWindow, dialog, ipcMain, Menu, screen, session } from "electron";
 import axios from "axios";
 import * as path from "path";
 
@@ -141,7 +141,7 @@ async function activateLockdown(): Promise<{ success: boolean; error?: string }>
       logViolation({
         session_id: currentSession.sessionId,
         event_type: "blocked_shortcut",
-        severity: "medium",
+        severity: "high",
         message: `Phím tắt bị chặn: ${shortcut}`,
       });
     }
@@ -279,6 +279,7 @@ function createWindow(): void {
     width,
     height,
     fullscreen: false,
+    autoHideMenuBar: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     backgroundColor: "#0f1117",
     webPreferences: {
@@ -290,6 +291,9 @@ function createWindow(): void {
       webSecurity: true,
     },
   });
+
+  // Remove the default menu bar (File, Edit, View, Window, Help)
+  Menu.setApplicationMenu(null);
 
   const isDev = !app.isPackaged;
   if (isDev) {
@@ -305,13 +309,13 @@ function createWindow(): void {
       mainWindow?.webContents.send("window:focuslost");
       void logViolationToBackend({
         event_type: "app_focus_lost",
-        severity: "medium",
+        severity: "high",
         metadata: {},
       });
       logViolation({
         session_id: currentSession.sessionId,
         event_type: "app_focus_lost",
-        severity: "medium",
+        severity: "high",
         message: "Thí sinh rời khỏi cửa sổ thi",
       });
 

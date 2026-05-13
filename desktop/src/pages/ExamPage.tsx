@@ -44,7 +44,12 @@ export default function ExamPage({
 }: Props) {
   // ── Phase management ─────────────────────────────────────────────
   const [examPhase, setExamPhase] = useState<ExamPhase>("pre-exam");
+  const examPhaseRef = useRef<ExamPhase>("pre-exam");
   const [preExamCountdown, setPreExamCountdown] = useState(PRE_EXAM_DURATION);
+
+  // ── Submission state ─────────────────────────────────────────────
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
 
   // ── Exam state ───────────────────────────────────────────────────
   const [elapsed, setElapsed] = useState(0);
@@ -77,7 +82,11 @@ export default function ExamPage({
       customMsg?: string,
       violationId?: string
     ) => {
-      addViolation(type, severity, metadata, customMsg, violationId);
+      if (isSubmittingRef.current) return;
+
+      if (examPhaseRef.current === "active") {
+        addViolation(type, severity, metadata, customMsg, violationId);
+      }
 
       const messages: Record<string, string> = {
         multiple_faces: "Phát hiện nhiều khuôn mặt trong khung hình!",
@@ -137,7 +146,7 @@ export default function ExamPage({
         captureViolationClip(violationId);
         handleViolation(
           "no_face",
-          "critical",
+          "high",
           {
             ...details,
             no_face_duration_ms: durationMs,
@@ -158,7 +167,7 @@ export default function ExamPage({
         captureViolationClip(violationId);
         handleViolation(
           "multiple_faces",
-          "critical",
+          "medium",
           {
             ...details,
             confirmed_face_count: faceCount,
@@ -180,7 +189,11 @@ export default function ExamPage({
     }
 
     if (verdict.level === 2) {
-      handleViolation("ai_cheating_l1", "medium", details, verdict.message);
+      if (canEmitLevelTwoEvent("ai_cheating_l1")) {
+        const violationId = crypto.randomUUID();
+        captureViolationClip(violationId);
+        handleViolation("ai_cheating_l1", "medium", details, verdict.message, violationId);
+      }
       return;
     }
 
@@ -235,6 +248,7 @@ export default function ExamPage({
 
       console.log("[ExamPage] Transitioning to active phase");
       setExamPhase("active");
+      examPhaseRef.current = "active";
     } catch (err: any) {
       console.error("[ExamPage] Lockdown error:", err);
       setLockdownError(err.message || "Lỗi khi kích hoạt chế độ thi");
@@ -262,7 +276,7 @@ export default function ExamPage({
     if (examPhase !== "active") return;
 
     const unFocus = api.onFocusLost(() => {
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || isSubmittingRef.current) return;
 
       setShowFocusWarning(true);
       setFocusCountdown(FOCUS_COUNTDOWN_DURATION);
@@ -285,7 +299,7 @@ export default function ExamPage({
     });
 
     const unFocusRegained = api.onFocusRegained(() => {
-      if (isCancelledRef.current) return;
+      if (isCancelledRef.current || isSubmittingRef.current) return;
 
       // Cancel countdown
       if (focusTimerRef.current) {
@@ -341,13 +355,18 @@ export default function ExamPage({
   };
 
   const handleEndExam = async () => {
+    if (isSubmittingRef.current) return;
+    setIsSubmitting(true);
+    isSubmittingRef.current = true;
     await flushViolations();
     await api.endExam(sessionId, getViolationCounts());
     onExamEnd();
   };
 
   const handleAutoSubmit = async (reason: string) => {
-    if (isCancelledRef.current) return;
+    if (isCancelledRef.current || isSubmittingRef.current) return;
+    setIsSubmitting(true);
+    isSubmittingRef.current = true;
     addViolation("exam_auto_submit", "critical", { reason }, reason);
     await flushViolations();
     await api.endExam(sessionId, getViolationCounts());
@@ -355,8 +374,10 @@ export default function ExamPage({
   };
 
   const handleCancelExam = async (reason: string) => {
-    if (isCancelledRef.current) return;
+    if (isCancelledRef.current || isSubmittingRef.current) return;
     isCancelledRef.current = true;
+    setIsSubmitting(true);
+    isSubmittingRef.current = true;
 
     addViolation("exam_cancelled", "critical", { reason, tab_switch_count: tabSwitchCount }, reason);
     await flushViolations();
@@ -460,6 +481,16 @@ export default function ExamPage({
   return (
     <div style={{ ...styles.page, flexDirection: "column" }}>
       {preExamUI}
+      
+      {/* ── Submitting Overlay ──────────────────────────────────────── */}
+      {isSubmitting && (
+        <div style={styles.submittingOverlay}>
+          <div style={styles.largeSpinner} />
+          <h2 style={{ marginTop: 16, color: "var(--color-text)" }}>Đang xử lý dữ liệu...</h2>
+          <p style={{ color: "var(--color-text-muted)" }}>Vui lòng đợi trong giây lát</p>
+        </div>
+      )}
+
       {/* ── Focus Warning Overlay (5s countdown) ──────────────── */}
       {showFocusWarning && (
         <div style={styles.focusWarningOverlay}>
@@ -595,6 +626,28 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "0 2px 2px 0",
     transition: "width 1s linear",
   },
+  submittingOverlay: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: "rgba(9, 18, 32, 0.9)",
+    backdropFilter: "blur(8px)",
+    zIndex: 99999,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  largeSpinner: {
+    width: 48,
+    height: 48,
+    border: "4px solid rgba(79, 142, 247, 0.2)",
+    borderTopColor: "var(--color-primary)",
+    borderRadius: "50%",
+    animation: "spin 1s linear infinite",
+  },
   bannerContent: {
     display: "flex",
     alignItems: "center",
@@ -656,7 +709,6 @@ const styles: Record<string, React.CSSProperties> = {
     inset: 0,
     zIndex: 9999,
     background: "rgba(255, 0, 0, 0.15)",
-    backdropFilter: "blur(4px)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",

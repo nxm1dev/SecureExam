@@ -18,8 +18,14 @@ export function shouldPersistViolation(
   severity: string,
   metadata: Record<string, unknown> = {}
 ): boolean {
-  if (eventType === "ai_cheating_l2") {
-    return severity === "critical" || severity === "high";
+  // Critical và high luôn được lưu (mức 2 trở lên)
+  if (severity === "critical" || severity === "high") {
+    return true;
+  }
+
+  // ai_cheating_l1 = mức 2 (medium) – luôn lưu kèm video
+  if (eventType === "ai_cheating_l1") {
+    return true;
   }
 
   if (eventType === "multiple_faces") {

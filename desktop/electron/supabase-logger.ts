@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import WebSocket from "ws";
 import { shouldPersistViolation } from "./violation-policy";
+import { appendViolation } from "./violation-store";
 
 const SUPABASE_URL = "https://oyfsjrywxxfndcwjyopi.supabase.co";
 const SUPABASE_ANON_KEY =
@@ -228,6 +229,9 @@ export function logViolation(violation: {
   if (!shouldPersistViolation(violation.event_type, violation.severity, violation.metadata || {})) {
     return;
   }
+
+  // ── Persist to local store (permanent, never deleted) ──────────
+  appendViolation(violation);
 
   const entry: PendingViolation = {
     id: violation.id ?? crypto.randomUUID(),
