@@ -4,6 +4,8 @@
  * Ring buffer for camera + microphone recording.
  * Continuously records at 480p 15FPS + full audio.
  * When a violation is triggered, captures a ~10s clip (5s before + 5s after).
+ * 
+ * FIX: Uses Overlapping Recorders instead of Chunk Stitching to ensure 100% valid WebM files with correct durations.
  */
 
 import { useRef, useCallback, useEffect, useState } from "react";
@@ -14,7 +16,7 @@ interface UseRollingBufferOptions {
   sessionId: string;
   /** Seconds of pre-violation footage to keep in memory */
   bufferDuration?: number;
-  /** Chunk interval in ms (default 2000) */
+  /** Chunk interval in ms */
   chunkIntervalMs?: number;
 }
 
@@ -29,6 +31,15 @@ interface RollingBufferAPI {
   captureViolationClip: (violationId: string) => void;
 }
 
+type RecorderSession = {
+  id: string;
+  recorder: MediaRecorder;
+  chunks: Blob[];
+  startTime: number;
+  isCapturing: boolean;
+  violationId?: string;
+};
+
 export function useRollingBuffer({
   sessionId,
   bufferDuration = 5,
@@ -36,134 +47,165 @@ export function useRollingBuffer({
 }: UseRollingBufferOptions): RollingBufferAPI {
   const [isRecording, setIsRecording] = useState(false);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const maxChunks = Math.ceil((bufferDuration * 1000) / chunkIntervalMs);
-  const capturingRef = useRef(false);
-  const captureChunksRef = useRef<Blob[]>([]);
-  const captureViolationIdRef = useRef<string>("");
-  const captureTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const preCaptureChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const sessionsRef = useRef<RecorderSession[]>([]);
+  const spawnIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const uploadCapturedChunks = useCallback(async () => {
-    const allChunks = [...preCaptureChunksRef.current, ...captureChunksRef.current];
-    preCaptureChunksRef.current = [];
-    captureChunksRef.current = [];
+  const uploadBlob = useCallback(async (blob: Blob, violationId: string) => {
+    try {
+      console.log(`[RollingBuffer] Clip size: ${(blob.size / 1024).toFixed(1)}KB`);
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+      
+      // Efficiently convert to base64
+      let binary = "";
+      // Use chunking to prevent stack overflow on huge arrays
+      const chunkSize = 8192;
+      for (let i = 0; i < uint8.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, Array.from(uint8.subarray(i, i + chunkSize)));
+      }
+      
+      const base64 = btoa(binary);
 
-    if (allChunks.length === 0) {
-      console.warn("[RollingBuffer] No chunks to capture");
-      return;
+      await api.uploadViolationVideo(sessionId, violationId, base64);
+      console.log(`[RollingBuffer] Clip for violation ${violationId} uploaded successfully`);
+    } catch (err: any) {
+      console.error("[RollingBuffer] Upload failed:", err.message);
     }
-
-    const blob = new Blob(allChunks, { type: "video/webm" });
-    console.log(`[RollingBuffer] Clip size: ${(blob.size / 1024).toFixed(1)}KB`);
-
-    const arrayBuffer = await blob.arrayBuffer();
-    const uint8 = new Uint8Array(arrayBuffer);
-    let binary = "";
-    for (let i = 0; i < uint8.byteLength; i++) {
-      binary += String.fromCharCode(uint8[i]);
-    }
-    const base64 = btoa(binary);
-
-    await api.uploadViolationVideo(
-      sessionId,
-      captureViolationIdRef.current,
-      base64
-    );
-
-    console.log("[RollingBuffer] Clip uploaded successfully");
   }, [sessionId]);
+
+  const spawnRecorder = useCallback(() => {
+    if (!streamRef.current) return;
+
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+      ? "video/webm;codecs=vp8,opus"
+      : "video/webm";
+
+    const recorder = new MediaRecorder(streamRef.current, {
+      mimeType,
+      videoBitsPerSecond: 500_000, // 500kbps – low quality but visible
+    });
+
+    const session: RecorderSession = {
+      id: Math.random().toString(36).slice(2),
+      recorder,
+      chunks: [],
+      startTime: Date.now(),
+      isCapturing: false,
+    };
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        session.chunks.push(event.data);
+      }
+    };
+
+    recorder.onstop = () => {
+      if (session.isCapturing && session.violationId) {
+        const blob = new Blob(session.chunks, { type: "video/webm" });
+        void uploadBlob(blob, session.violationId);
+      }
+    };
+
+    recorder.start(chunkIntervalMs);
+    sessionsRef.current.push(session);
+  }, [chunkIntervalMs, uploadBlob]);
+
+  const cleanupOldRecorders = useCallback(() => {
+    const now = Date.now();
+    sessionsRef.current = sessionsRef.current.filter((session) => {
+      // Keep capturing sessions alive until they finish
+      if (session.isCapturing) return true;
+
+      // If a session is older than (bufferDuration * 2 + 2) seconds, it's too old
+      // (e.g., 12 seconds). We stop it and remove it.
+      if (now - session.startTime > (bufferDuration * 2 + 2) * 1000) {
+        if (session.recorder.state !== "inactive") {
+          session.recorder.stop();
+        }
+        return false;
+      }
+      return true;
+    });
+  }, [bufferDuration]);
 
   const startRecording = useCallback(
     (stream: MediaStream) => {
-      if (mediaRecorderRef.current) return;
-
-      // Determine supported MIME type
-      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
-        ? "video/webm;codecs=vp8,opus"
-        : "video/webm";
-
-      const recorder = new MediaRecorder(stream, {
-        mimeType,
-        videoBitsPerSecond: 500_000, // 500kbps – low quality but visible
-      });
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size === 0) return;
-
-        // Add to ring buffer
-        chunksRef.current.push(event.data);
-        if (chunksRef.current.length > maxChunks) {
-          chunksRef.current.shift(); // Drop oldest chunk
-        }
-
-        // If we're in capture mode, also collect post-violation chunks
-        if (capturingRef.current) {
-          captureChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.start(chunkIntervalMs); // Produce chunk every 2s
-      mediaRecorderRef.current = recorder;
+      if (isRecording) return;
+      
+      streamRef.current = stream;
       setIsRecording(true);
+      console.log("[RollingBuffer] Started recording (Overlapping Mode)");
 
-      console.log("[RollingBuffer] Started recording");
+      // Spawn the first recorder immediately
+      spawnRecorder();
+
+      // Spawn a new recorder every `bufferDuration` seconds
+      spawnIntervalRef.current = setInterval(() => {
+        spawnRecorder();
+        cleanupOldRecorders();
+      }, bufferDuration * 1000);
     },
-    [chunkIntervalMs, maxChunks]
+    [isRecording, bufferDuration, spawnRecorder, cleanupOldRecorders]
   );
-
-  const stopRecording = useCallback(() => {
-    if (captureTimeoutRef.current) {
-      clearTimeout(captureTimeoutRef.current);
-      captureTimeoutRef.current = null;
-    }
-
-    if (capturingRef.current) {
-      capturingRef.current = false;
-      void uploadCapturedChunks().catch((err: any) => {
-        console.error("[RollingBuffer] Finalize upload failed:", err.message);
-      });
-    }
-
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current = null;
-    }
-    chunksRef.current = [];
-    preCaptureChunksRef.current = [];
-    setIsRecording(false);
-    console.log("[RollingBuffer] Stopped recording");
-  }, [uploadCapturedChunks]);
 
   const captureViolationClip = useCallback(
     (violationId: string) => {
-      // Don't capture if already capturing or not recording
-      if (capturingRef.current || !mediaRecorderRef.current) return;
+      const now = Date.now();
 
-      console.log(`[RollingBuffer] Capturing violation clip: ${violationId}`);
+      // Find sessions that are NOT already capturing
+      const available = sessionsRef.current.filter((s) => !s.isCapturing);
+      if (available.length === 0) {
+        console.warn("[RollingBuffer] No available recorders for clip capture.");
+        return;
+      }
 
-      capturingRef.current = true;
-      captureViolationIdRef.current = violationId;
+      // Sort by how close their history is to the desired pre-violation `bufferDuration`
+      available.sort((a, b) => {
+        const historyA = now - a.startTime;
+        const historyB = now - b.startTime;
+        return Math.abs(historyA - bufferDuration * 1000) - Math.abs(historyB - bufferDuration * 1000);
+      });
 
-      // Keep the current ring buffer as the pre-violation window.
-      preCaptureChunksRef.current = [...chunksRef.current];
-      captureChunksRef.current = [];
+      const bestSession = available[0];
+      bestSession.isCapturing = true;
+      bestSession.violationId = violationId;
 
-      // Collect an additional post-violation window of equal duration.
-      captureTimeoutRef.current = setTimeout(async () => {
-        capturingRef.current = false;
-        captureTimeoutRef.current = null;
+      console.log(
+        `[RollingBuffer] Capturing violation ${violationId}. Pre-history: ${
+          ((now - bestSession.startTime) / 1000).toFixed(1)
+        }s`
+      );
 
-        try {
-          await uploadCapturedChunks();
-        } catch (err: any) {
-          console.error("[RollingBuffer] Upload failed:", err.message);
+      // Let it run for the post-violation duration, then stop it to trigger upload
+      setTimeout(() => {
+        if (bestSession.recorder.state !== "inactive") {
+          bestSession.recorder.stop();
         }
+        // Remove it from the active tracking array
+        sessionsRef.current = sessionsRef.current.filter((s) => s.id !== bestSession.id);
       }, bufferDuration * 1000);
     },
-    [bufferDuration, uploadCapturedChunks]
+    [bufferDuration]
   );
+
+  const stopRecording = useCallback(() => {
+    if (spawnIntervalRef.current) {
+      clearInterval(spawnIntervalRef.current);
+      spawnIntervalRef.current = null;
+    }
+
+    sessionsRef.current.forEach((session) => {
+      if (session.recorder.state !== "inactive") {
+        session.recorder.stop();
+      }
+    });
+
+    sessionsRef.current = [];
+    streamRef.current = null;
+    setIsRecording(false);
+    console.log("[RollingBuffer] Stopped recording");
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {

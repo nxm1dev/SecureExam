@@ -149,6 +149,10 @@ export default function SetupPage({ onExamStart, onTestMode }: Props) {
               ))}
             </div>
           </div>
+          
+          <div style={styles.ruleBlock}>
+            <h2 style={styles.blockTitle}>Các bước vào thi</h2>
+          </div>
 
           <div style={styles.timelineBlock}>
             {EXAM_STEPS.map((step, index) => (

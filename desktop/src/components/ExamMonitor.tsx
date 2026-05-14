@@ -48,37 +48,57 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
   });
 
   useEffect(() => {
-    const socket = new WebSocket(webSocketUrl);
+    let reconnectTimer: NodeJS.Timeout;
+    let isUnmounted = false;
 
-    socket.onopen = () => {
-      console.log("[ExamMonitor] WebSocket connected");
-      setWsConnected(true);
+    const connect = () => {
+      if (isUnmounted) return;
+      
+      const socket = new WebSocket(webSocketUrl);
+
+      socket.onopen = () => {
+        console.log("[ExamMonitor] WebSocket connected");
+        setWsConnected(true);
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const data: MonitorVerdict = JSON.parse(event.data);
+          setVerdict(data);
+          onVerdict?.(data, captureViolationClip);
+        } catch {
+          console.warn("[ExamMonitor] Invalid verdict JSON");
+        }
+      };
+
+      socket.onclose = () => {
+        console.log("[ExamMonitor] WebSocket disconnected. Reconnecting in 2s...");
+        setWsConnected(false);
+        wsRef.current = null;
+        if (!isUnmounted) {
+          reconnectTimer = setTimeout(connect, 2000);
+        }
+      };
+
+      socket.onerror = (err) => {
+        console.error("[ExamMonitor] WebSocket error:", err);
+        // onclose is usually called immediately after onerror
+      };
+
+      wsRef.current = socket;
     };
 
-    socket.onmessage = (event) => {
-      try {
-        const data: MonitorVerdict = JSON.parse(event.data);
-        setVerdict(data);
-        onVerdict?.(data, captureViolationClip);
-      } catch {
-        console.warn("[ExamMonitor] Invalid verdict JSON");
-      }
-    };
-
-    socket.onclose = () => {
-      console.log("[ExamMonitor] WebSocket disconnected");
-      setWsConnected(false);
-    };
-
-    socket.onerror = (err) => {
-      console.error("[ExamMonitor] WebSocket error:", err);
-    };
-
-    wsRef.current = socket;
+    connect();
 
     return () => {
-      socket.close();
-      wsRef.current = null;
+      isUnmounted = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (wsRef.current) {
+        // Remove the onclose handler so it doesn't trigger a reconnect when the component unmounts
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
   }, [captureViolationClip, onVerdict, webSocketUrl]);
 
@@ -139,16 +159,16 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
 
   const vad = useMicVAD({
     startOnLoad: true,
-    onnxWASMBasePath: "/",
-    baseAssetPath: "/",
+    onnxWASMBasePath: "./",
+    baseAssetPath: "./",
     model: "legacy",
     ortConfig: (ort: any) => {
       ort.env.wasm.numThreads = 1;
       ort.env.wasm.wasmPaths = {
-        "ort-wasm-simd-threaded.wasm": "/ort-wasm-simd-threaded.wasm",
-        "ort-wasm-simd.wasm": "/ort-wasm-simd-threaded.wasm",
-        "ort-wasm.wasm": "/ort-wasm-simd-threaded.wasm",
-        "ort-wasm-threaded.wasm": "/ort-wasm-simd-threaded.wasm",
+        "ort-wasm-simd-threaded.wasm": "./ort-wasm-simd-threaded.wasm",
+        "ort-wasm-simd.wasm": "./ort-wasm-simd-threaded.wasm",
+        "ort-wasm.wasm": "./ort-wasm-simd-threaded.wasm",
+        "ort-wasm-threaded.wasm": "./ort-wasm-simd-threaded.wasm",
       };
     },
     onSpeechStart: () => {

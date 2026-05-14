@@ -1,4 +1,4 @@
-export const NO_FACE_LOG_THRESHOLD_MS = 10_000;
+export const NO_FACE_LOG_THRESHOLD_MS = 8_000;
 export const LEVEL_TWO_LOG_COOLDOWN_MS = 12_000;
 
 function toNumber(value: unknown): number {
