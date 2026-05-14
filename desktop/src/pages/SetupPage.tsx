@@ -29,10 +29,10 @@ const EXAM_STEPS = [
   },
   {
     title: "Mở đúng bài thi",
-    description: "Chỉ các đường dẫn nằm trong danh sách cho phép mới được tải.",
+    description: "Nhập đúng link bài thi đã được cung cấp",
   },
   {
-    title: "Bắt đầu giám sát",
+    title: "Bắt đầu bài thi",
     description: "Camera, micro và chế độ khóa màn hình sẽ được kích hoạt khi làm bài.",
   },
 ];
@@ -261,7 +261,7 @@ export default function SetupPage({ onExamStart, onTestMode }: Props) {
                 style={styles.secondaryButton}
                 onClick={onTestMode}
               >
-                Mở chế độ kiểm thử AI Monitor
+                Kiểm tra thiết bị làm bài
               </button>
             )}
           </div>
