@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+import { SERVICE_URLS } from "./service-urls";
+
 export interface ExamSessionConfig {
   userId: string;
   examUrl: string;
@@ -44,6 +46,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("ai:analyzeFrame", frameB64, referenceEmbeddingB64),
   analyzeAudio: (pcmB64: string, sessionId: string) =>
     ipcRenderer.invoke("ai:analyzeAudio", pcmB64, sessionId),
+  getAiMonitorWebSocketUrl: (sessionId: string) => {
+    const url = new URL(SERVICE_URLS.ai);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.pathname = `/ws/monitor/${encodeURIComponent(sessionId)}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  },
 
   // ── Report ──────────────────────────────────────────────────────
   getReport: (sessionId: string) => ipcRenderer.invoke("report:get", sessionId),

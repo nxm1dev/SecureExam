@@ -392,7 +392,7 @@ export default function ExamPage({
     `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   const criticalCount = violations.filter(v => v.severity === "critical" || v.severity === "high").length;
-  const wsUrl = `ws://127.0.0.1:8001/ws/monitor/${sessionId}`;
+  const wsUrl = api.getAiMonitorWebSocketUrl(sessionId);
 
   // ── Pre-exam Banner (compact) ────────────────────────────────────
   const progressPercent = (preExamCountdown / PRE_EXAM_DURATION) * 100;

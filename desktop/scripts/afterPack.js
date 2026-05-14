@@ -1,4 +1,4 @@
-const rcedit = require('rcedit');
+const { rcedit } = require('rcedit');
 const path = require('path');
 const fs = require('fs');
 

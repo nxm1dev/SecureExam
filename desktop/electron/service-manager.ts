@@ -195,47 +195,9 @@ export async function ensurePackagedServicesReady() {
     return;
   }
 
-  const backendHealthy = await isHealthy(`${SERVICE_URLS.backend}/health`);
-  const aiHealthy = await isHealthy(`${SERVICE_URLS.ai}/health`);
-
-  if (backendHealthy && aiHealthy) {
-    return;
-  }
-
-  const python = resolvePythonLauncher();
-  const runtimeRoot = getRuntimeRoot();
-  const backendDir = path.join(runtimeRoot, "backend");
-  const aiServiceDir = path.join(runtimeRoot, "ai-service");
-  const configDir = path.join(runtimeRoot, "config");
-  const dataRoot = path.join(app.getPath("userData"), "runtime");
-  const dbPath = path.join(dataRoot, "examac.db");
-  const modelCacheDir = path.join(dataRoot, "ai-model-cache");
-
-  ensureDirectory(dataRoot);
-  ensureDirectory(modelCacheDir);
-
-  if (!fs.existsSync(backendDir) || !fs.existsSync(aiServiceDir) || !fs.existsSync(configDir)) {
-    throw new Error(
-      "Khong tim thay backend, ai-service hoac config trong goi cai dat."
-    );
-  }
-
-  if (!backendHealthy) {
-    const backendProcess = spawnService("backend", python, backendDir, BACKEND_PORT, {
-      DATABASE_URL: toSqliteUrl(dbPath),
-      AI_SERVICE_URL: SERVICE_URLS.ai,
-      EXAMAC_CONFIG_DIR: configDir,
-    });
-    await waitForHealth("backend", `${SERVICE_URLS.backend}/health`, backendProcess);
-  }
-
-  if (!aiHealthy) {
-    const aiProcess = spawnService("ai-service", python, aiServiceDir, AI_SERVICE_PORT, {
-      MODEL_CACHE_DIR: modelCacheDir,
-      EXAMAC_CONFIG_DIR: configDir,
-    });
-    await waitForHealth("ai-service", `${SERVICE_URLS.ai}/health`, aiProcess);
-  }
+  // We are now fully cloud-hosted (Render & Hugging Face)
+  // No local Python processes will be spawned.
+  console.log("[Service Manager] Cloud services are configured. Skipping local service spawn.");
 }
 
 export function stopManagedServices() {

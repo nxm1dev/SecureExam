@@ -50,11 +50,11 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = (
-        "postgresql+asyncpg://examac:examac_pass@localhost:5432/examac"
+        "postgresql+asyncpg://postgres.oyfsjrywxxfndcwjyopi:Nguyenminhnhat@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres"
     )
 
     # AI service URL
-    ai_service_url: str = "http://localhost:8001"
+    ai_service_url: str = "https://nx-m1-ea.hf.space"
 
     # JWT / Auth (minimal for MVP)
     secret_key: str = "change-me-in-production-please"

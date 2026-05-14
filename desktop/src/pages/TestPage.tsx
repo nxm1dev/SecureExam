@@ -10,7 +10,7 @@ interface LogEntry {
 export default function TestPage({ onBack }: { onBack: () => void }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const sessionId = "test-session-123";
-  const wsUrl = `ws://127.0.0.1:8001/ws/monitor/${sessionId}`;
+  const wsUrl = (window as any).electronAPI.getAiMonitorWebSocketUrl(sessionId);
 
   const handleVerdict = useCallback((verdict: MonitorVerdict) => {
     // Chỉ log những kết quả có thay đổi trạng thái, có cảnh báo, hoặc thay đổi trạng thái nhận diện âm thanh
