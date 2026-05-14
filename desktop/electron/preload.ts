@@ -46,6 +46,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("ai:analyzeFrame", frameB64, referenceEmbeddingB64),
   analyzeAudio: (pcmB64: string, sessionId: string) =>
     ipcRenderer.invoke("ai:analyzeAudio", pcmB64, sessionId),
+  analyzeMonitorFrame: (
+    sessionId: string,
+    payload: { speech_detected: boolean; timestamp: number; sequence: number; image: string }
+  ) => ipcRenderer.invoke("ai:analyzeMonitorFrame", sessionId, payload),
   getAiMonitorWebSocketUrl: (sessionId: string) => {
     const url = new URL(SERVICE_URLS.ai);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";

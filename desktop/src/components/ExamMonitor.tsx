@@ -15,6 +15,13 @@ export interface MonitorVerdict {
   details?: Record<string, unknown>;
 }
 
+type MonitorPayload = {
+  speech_detected: boolean;
+  timestamp: number;
+  sequence: number;
+  image: string;
+};
+
 const STATUS_LABELS: Record<string, string> = {
   NORMAL: "Bình thường",
   MILD_WARNING: "Cảnh báo nhẹ",
@@ -29,6 +36,15 @@ const levelColors: Record<number, string> = {
   3: "#ff5d7d",
 };
 
+const FRAME_WIDTH = 512;
+const FRAME_HEIGHT = 384;
+const FRAME_QUALITY = 0.6;
+const IDLE_CAPTURE_INTERVAL_MS = 1500;
+const SPEAKING_CAPTURE_INTERVAL_MS = 700;
+const VERDICT_TIMEOUT_MS = 5000;
+const MAX_SOCKET_BUFFERED_BYTES = 512 * 1024;
+const api = (window as any).electronAPI;
+
 const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVerdict }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -36,16 +52,74 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
   const speechDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const isSpeakingRef = useRef(false);
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectDelayRef = useRef(2000);
+  const awaitingVerdictRef = useRef(false);
+  const verdictTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const sequenceRef = useRef(0);
 
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [verdict, setVerdict] = useState<MonitorVerdict | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [fallbackConnected, setFallbackConnected] = useState(false);
 
   const { startRecording, captureViolationClip } = useRollingBuffer({
     sessionId,
     bufferDuration: 5,
     chunkIntervalMs: 1000,
   });
+
+  const clearVerdictTimeout = useCallback(() => {
+    if (verdictTimeoutRef.current) {
+      clearTimeout(verdictTimeoutRef.current);
+      verdictTimeoutRef.current = null;
+    }
+  }, []);
+
+  const markVerdictSettled = useCallback(() => {
+    awaitingVerdictRef.current = false;
+    clearVerdictTimeout();
+  }, [clearVerdictTimeout]);
+
+  const armVerdictTimeout = useCallback(() => {
+    clearVerdictTimeout();
+    verdictTimeoutRef.current = setTimeout(() => {
+      if (!awaitingVerdictRef.current) {
+        return;
+      }
+
+      console.warn("[ExamMonitor] AI verdict timeout. Recycling WebSocket connection.");
+      awaitingVerdictRef.current = false;
+
+      const socket = wsRef.current;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close(4000, "verdict-timeout");
+      }
+    }, VERDICT_TIMEOUT_MS);
+  }, [clearVerdictTimeout]);
+
+  const handleVerdict = useCallback(
+    (data: MonitorVerdict) => {
+      setVerdict(data);
+      onVerdict?.(data, captureViolationClip);
+    },
+    [captureViolationClip, onVerdict]
+  );
+
+  const sendViaHttpFallback = useCallback(
+    async (payload: MonitorPayload) => {
+      try {
+        const data: MonitorVerdict = await api.analyzeMonitorFrame(sessionId, payload);
+        markVerdictSettled();
+        setFallbackConnected(true);
+        handleVerdict(data);
+      } catch (error) {
+        markVerdictSettled();
+        setFallbackConnected(false);
+        console.warn("[ExamMonitor] HTTP fallback analysis failed:", error);
+      }
+    },
+    [handleVerdict, markVerdictSettled, sessionId]
+  );
 
   useEffect(() => {
     let reconnectTimer: NodeJS.Timeout;
@@ -58,25 +132,32 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
 
       socket.onopen = () => {
         console.log("[ExamMonitor] WebSocket connected");
+        reconnectDelayRef.current = 2000;
+        awaitingVerdictRef.current = false;
+        clearVerdictTimeout();
         setWsConnected(true);
+        setFallbackConnected(false);
       };
 
       socket.onmessage = (event) => {
+        markVerdictSettled();
         try {
           const data: MonitorVerdict = JSON.parse(event.data);
-          setVerdict(data);
-          onVerdict?.(data, captureViolationClip);
+          handleVerdict(data);
         } catch {
           console.warn("[ExamMonitor] Invalid verdict JSON");
         }
       };
 
       socket.onclose = () => {
-        console.log("[ExamMonitor] WebSocket disconnected. Reconnecting in 2s...");
+        const delay = reconnectDelayRef.current;
+        console.log(`[ExamMonitor] WebSocket disconnected. Reconnecting in ${delay}ms...`);
         setWsConnected(false);
+        markVerdictSettled();
         wsRef.current = null;
         if (!isUnmounted) {
-          reconnectTimer = setTimeout(connect, 2000);
+          reconnectTimer = setTimeout(connect, delay);
+          reconnectDelayRef.current = Math.min(delay * 1.5, 5000);
         }
       };
 
@@ -92,6 +173,7 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
 
     return () => {
       isUnmounted = true;
+      clearVerdictTimeout();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (wsRef.current) {
         // Remove the onclose handler so it doesn't trigger a reconnect when the component unmounts
@@ -100,7 +182,7 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
         wsRef.current = null;
       }
     };
-  }, [captureViolationClip, onVerdict, webSocketUrl]);
+  }, [clearVerdictTimeout, handleVerdict, markVerdictSettled, webSocketUrl]);
 
   useEffect(() => {
     navigator.mediaDevices
@@ -122,7 +204,22 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
     const canvas = canvasRef.current;
     const ws = wsRef.current;
 
-    if (!video || !canvas || !ws || ws.readyState !== WebSocket.OPEN) {
+    if (!video || !canvas) {
+      return;
+    }
+
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      return;
+    }
+
+    if (awaitingVerdictRef.current) {
+      return;
+    }
+
+    const canUseWebSocket = ws?.readyState === WebSocket.OPEN;
+
+    if (canUseWebSocket && ws.bufferedAmount > MAX_SOCKET_BUFFERED_BYTES) {
+      console.warn("[ExamMonitor] WebSocket buffer is saturated. Skipping this frame.");
       return;
     }
 
@@ -131,24 +228,35 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
       return;
     }
 
-    canvas.width = 640;
-    canvas.height = 480;
+    canvas.width = FRAME_WIDTH;
+    canvas.height = FRAME_HEIGHT;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const base64Image = canvas.toDataURL("image/jpeg", 0.7);
-    ws.send(
-      JSON.stringify({
-        speech_detected: isSpeakingRef.current,
-        timestamp: Date.now(),
-        image: base64Image,
-      })
-    );
-  }, []);
+    const base64Image = canvas.toDataURL("image/jpeg", FRAME_QUALITY);
+    sequenceRef.current += 1;
+    const payload: MonitorPayload = {
+      speech_detected: isSpeakingRef.current,
+      timestamp: Date.now(),
+      sequence: sequenceRef.current,
+      image: base64Image,
+    };
 
-  const startCapture = useCallback(() => {
-    captureAndSend();
-    captureIntervalRef.current = setInterval(captureAndSend, 500);
-  }, [captureAndSend]);
+    try {
+      awaitingVerdictRef.current = true;
+      if (!canUseWebSocket) {
+        void sendViaHttpFallback(payload);
+        armVerdictTimeout();
+        return;
+      }
+
+      ws.send(JSON.stringify(payload));
+      armVerdictTimeout();
+    } catch (error) {
+      console.error("[ExamMonitor] Failed to send frame:", error);
+      void sendViaHttpFallback(payload);
+      armVerdictTimeout();
+    }
+  }, [armVerdictTimeout, sendViaHttpFallback]);
 
   const stopCapture = useCallback(() => {
     if (captureIntervalRef.current) {
@@ -156,6 +264,12 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
       captureIntervalRef.current = null;
     }
   }, []);
+
+  const startCapture = useCallback(() => {
+    stopCapture();
+    captureAndSend();
+    captureIntervalRef.current = setInterval(captureAndSend, SPEAKING_CAPTURE_INTERVAL_MS);
+  }, [captureAndSend, stopCapture]);
 
   const vad = useMicVAD({
     startOnLoad: true,
@@ -198,10 +312,10 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
 
   useEffect(() => {
     const bgTimer = setInterval(() => {
-      if (!isSpeakingRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+      if (!isSpeakingRef.current) {
         captureAndSend();
       }
-    }, 1000);
+    }, IDLE_CAPTURE_INTERVAL_MS);
 
     return () => clearInterval(bgTimer);
   }, [captureAndSend]);
@@ -209,14 +323,16 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
   useEffect(() => {
     return () => {
       stopCapture();
+      clearVerdictTimeout();
       if (speechDebounceRef.current) {
         clearTimeout(speechDebounceRef.current);
       }
     };
-  }, [stopCapture]);
+  }, [clearVerdictTimeout, stopCapture]);
 
   const verdictColor = verdict ? levelColors[verdict.level] || "#6b7280" : "#6b7280";
   const speechDetected = Boolean(verdict?.details?.speech_detected);
+  const aiConnected = wsConnected || fallbackConnected;
 
   return (
     <div style={styles.shell}>
@@ -228,11 +344,11 @@ const ExamMonitor: React.FC<ExamMonitorProps> = ({ webSocketUrl, sessionId, onVe
           <div
             style={{
               ...styles.statusChip,
-              background: wsConnected ? "rgba(69, 213, 154, 0.18)" : "rgba(109, 124, 146, 0.18)",
-              color: wsConnected ? "#9cf0cc" : "#c8d3e3",
+              background: aiConnected ? "rgba(69, 213, 154, 0.18)" : "rgba(109, 124, 146, 0.18)",
+              color: aiConnected ? "#9cf0cc" : "#c8d3e3",
             }}
           >
-            {wsConnected ? "Kết nối AI ổn định" : "Đang kết nối AI"}
+            {aiConnected ? "Kết nối AI ổn định" : "Đang kết nối AI"}
           </div>
 
           <div

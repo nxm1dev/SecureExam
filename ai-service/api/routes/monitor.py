@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import threading
+from typing import Any, Dict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -62,6 +63,13 @@ def _get_controller() -> ExamCheatController:
                     model_root=settings.model_cache_dir,
                 )
     return _controller
+
+
+@router.post("/analyze/monitor/{session_id}")
+async def analyze_monitor(session_id: str, payload: Dict[str, Any]):
+    controller = _get_controller()
+    controller.cleanup_stale_sessions()
+    return controller.process_payload(session_id, payload)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

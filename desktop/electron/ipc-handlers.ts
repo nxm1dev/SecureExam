@@ -256,6 +256,15 @@ export function registerIpcHandlers(options: RegisterHandlersOptions = {}): void
     return data;
   });
 
+  ipcMain.handle("ai:analyzeMonitorFrame", async (_event, sessionId: string, payload: unknown) => {
+    const { data } = await axios.post(
+      `${aiUrl}/analyze/monitor/${encodeURIComponent(sessionId)}`,
+      payload,
+      { timeout: 8_000 }
+    );
+    return data;
+  });
+
   // ── Report ─────────────────────────────────────────────────────
   ipcMain.handle("report:get", async (_event, sessionId: string) => {
     const MAX_RETRIES = 3;
