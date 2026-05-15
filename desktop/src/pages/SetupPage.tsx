@@ -69,6 +69,12 @@ export default function SetupPage({ onExamStart, onTestMode }: Props) {
       return;
     }
 
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setError("Email chưa đúng.");
+      return;
+    }
+
     try {
       setLoading(true);
       setError("");

@@ -15,8 +15,6 @@ import {
   initSupabaseLogger,
   shutdownSupabaseLogger,
   logViolation,
-  logSessionEnd,
-  updateSessionViolationCount,
 } from "./supabase-logger";
 import { shouldPersistViolation } from "./violation-policy";
 
@@ -151,18 +149,9 @@ async function activateLockdown(): Promise<{ success: boolean; error?: string }>
   // ── Process Scanner (every 60s) ────────────────────────────────
   startProcessScanner((processName) => {
     mainWindow?.webContents.send("cheating-alert", {
-      type: "process_killed",
+      type: "blacklisted_process",
       detail: `Đã tắt ứng dụng bị cấm: ${processName}`,
     });
-    if (currentSession) {
-      logViolation({
-        session_id: currentSession.sessionId,
-        event_type: "blacklisted_process",
-        severity: "high",
-        message: `Ứng dụng bị cấm bị kill: ${processName}`,
-        metadata: { process_name: processName },
-      });
-    }
   }, 60_000);
 
   // ── Monitor display changes during exam ─────────────────────────
@@ -309,17 +298,6 @@ function createWindow(): void {
   mainWindow.on("blur", () => {
     if (currentSession && isExamLocked) {
       mainWindow?.webContents.send("window:focuslost");
-      void logViolationToBackend({
-        event_type: "app_focus_lost",
-        severity: "high",
-        metadata: {},
-      });
-      logViolation({
-        session_id: currentSession.sessionId,
-        event_type: "app_focus_lost",
-        severity: "high",
-        message: "Thí sinh rời khỏi cửa sổ thi",
-      });
 
       // Auto re-focus after short delay
       setTimeout(() => {

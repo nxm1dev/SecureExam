@@ -48,9 +48,6 @@ const BLACKLIST: string[] = [
   "Telegram",
 
   // Screen Share / Record
-  "obs64",
-  "obs32",
-  "obs",
   "Bandicam",
   "bdcam",
   "CamStudio",
