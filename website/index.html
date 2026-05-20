@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EA - Exam Anti-Cheating</title>
+    <meta name="description" content="EA - Hệ thống chống gian lận thi cử sử dụng AI tiên tiến. Xem báo cáo và hướng dẫn sử dụng.">
+    <link rel="icon" href="../logo/EA.png" type="image/png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Animated Background Particles -->
+    <canvas id="particles"></canvas>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <img src="../logo/EA.png" alt="EA Logo" class="nav-logo">
+            <span class="nav-title">EA</span>
+        </div>
+        <div class="nav-badge">Exam Anti-Cheating</div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">
+                <span class="badge-dot"></span>
+                AI-Powered Security
+            </div>
+            <h1 class="hero-title">
+                <span class="title-line">Hệ Thống</span>
+                <span class="title-line gradient-text">Chống Gian Lận</span>
+                <span class="title-line">Thi Cử</span>
+            </h1>
+            <p class="hero-description">
+                Ứng dụng AI tiên tiến giám sát và phát hiện hành vi gian lận trong thi cử trực tuyến, 
+                đảm bảo tính công bằng và minh bạch cho mọi kỳ thi.
+            </p>
+            <div class="hero-stats">
+                <div class="stat-item">
+                    <span class="stat-number" data-count="99">0</span><span class="stat-suffix">%</span>
+                    <span class="stat-label">Độ chính xác</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <span class="stat-number" data-count="24">0</span><span class="stat-suffix">/7</span>
+                    <span class="stat-label">Giám sát</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <span class="stat-number" data-count="100">0</span><span class="stat-suffix">+</span>
+                    <span class="stat-label">Hành vi phát hiện</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Cards Section -->
+    <section class="cards-section" id="resources">
+        <div class="section-header">
+            <h2 class="section-title">Tài Nguyên</h2>
+            <p class="section-subtitle">Khám phá báo cáo chi tiết và hướng dẫn sử dụng hệ thống EA</p>
+        </div>
+        <div class="cards-grid">
+            <!-- Report Card -->
+            <a href="../report/Báo cáo EA.pdf" target="_blank" class="card card-report" id="report-card">
+                <div class="card-glow"></div>
+                <div class="card-icon-wrapper">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <polyline points="10 9 9 9 8 9"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <h3 class="card-title">Báo Cáo EA</h3>
+                    <p class="card-description">
+                        Xem báo cáo chi tiết về hệ thống chống gian lận thi cử, bao gồm kiến trúc, thuật toán và kết quả đánh giá.
+                    </p>
+                    <div class="card-action">
+                        <span class="action-text">Xem báo cáo</span>
+                        <svg class="action-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                            <polyline points="12 5 19 12 12 19"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="card-tag">PDF Document</div>
+            </a>
+
+            <!-- Video Card -->
+            <a href="https://ia600402.us.archive.org/0/items/hdsd-ea/HDSD_EA.mp4" target="_blank" class="card card-video" id="video-card">
+                <div class="card-glow"></div>
+                <div class="card-icon-wrapper">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <h3 class="card-title">Video Hướng Dẫn</h3>
+                    <p class="card-description">
+                        Xem video hướng dẫn sử dụng hệ thống EA từ A đến Z, giúp bạn nhanh chóng làm quen với mọi tính năng.
+                    </p>
+                    <div class="card-action">
+                        <span class="action-text">Xem video</span>
+                        <svg class="action-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                            <polyline points="12 5 19 12 12 19"/>
+                        </svg>
+                    </div>
+                </div>
+                <div class="card-tag">MP4 Video</div>
+            </a>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features-section">
+        <div class="features-grid">
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                </div>
+                <h4>Bảo Mật Cao</h4>
+                <p>Mã hóa dữ liệu và bảo vệ quyền riêng tư người dùng</p>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                    </svg>
+                </div>
+                <h4>AI Thông Minh</h4>
+                <p>Sử dụng mô hình học sâu để nhận diện hành vi bất thường</p>
+            </div>
+            <div class="feature-item">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                    </svg>
+                </div>
+                <h4>Thời Gian Thực</h4>
+                <p>Giám sát và cảnh báo ngay lập tức khi phát hiện vi phạm</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-brand">
+                <img src="../logo/EA.png" alt="EA Logo" class="footer-logo">
+                <span>EA - Exam Anti-Cheating</span>
+            </div>
+            <p class="footer-text">© 2026 EA Project. Bảo vệ tính toàn vẹn của giáo dục.</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
